@@ -1,28 +1,26 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
 
-// 1. Conecta com o Supabase usando as variáveis de ambiente
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-const supabase = createClient(supabaseUrl, supabaseKey);
-
 export async function GET(request: Request) {
   try {
-    // Puxa a chave do RD Conversas
+    // 1. Verifica se todas as chaves estão realmente carregadas na Vercel
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
     const rdToken = process.env.RD_API_TOKEN;
 
+    if (!supabaseUrl || !supabaseKey) {
+      return NextResponse.json({ error: 'Chaves do Supabase estão faltando na Vercel.' }, { status: 500 });
+    }
     if (!rdToken) {
-      return NextResponse.json(
-        { error: 'Token do RD Conversas não configurado.' }, 
-        { status: 500 }
-      );
+      return NextResponse.json({ error: 'Token do RD Conversas está faltando na Vercel.' }, { status: 500 });
     }
 
-    // 2. URL atualizada para a API V2 do RD Conversas
+    // Só conecta no Supabase depois de ter certeza que tem as chaves
+    const supabase = createClient(supabaseUrl, supabaseKey);
+
+    // 2. Tenta fazer a comunicação com o RD
     const rdUrl = 'https://api.conversas.rdstation.com/v2/messages';
     
-    console.log("Iniciando busca no RD Conversas com a nova URL...");
-
     const rdResponse = await fetch(rdUrl, {
       method: 'GET',
       headers: {
@@ -32,31 +30,33 @@ export async function GET(request: Request) {
       }
     });
 
-    // 3. Verifica se a requisição foi bem-sucedida
     if (!rdResponse.ok) {
        const erroTexto = await rdResponse.text();
-       console.error("Erro retornado pelo RD:", erroTexto);
-       return NextResponse.json(
-         { error: 'Falha na comunicação com RD', status_http: rdResponse.status, detalhes: erroTexto }, 
-         { status: rdResponse.status }
-       );
+       return NextResponse.json({ 
+         error: 'A API do RD Conversas recusou o pedido', 
+         status_http: rdResponse.status, 
+         detalhes: erroTexto 
+       }, { status: rdResponse.status });
     }
 
-    // 4. Converte a resposta com sucesso para JSON
-    const dadosRD = await rdResponse.json();
+    // 3. Lê os dados de forma segura (evitando erro se o RD mandar um texto vazio)
+    const textoPuro = await rdResponse.text();
+    if (!textoPuro) {
+        return NextResponse.json({ error: 'O RD Conversas respondeu, mas não mandou nenhum dado.' }, { status: 500 });
+    }
+    
+    const dadosRD = JSON.parse(textoPuro);
 
-    // Exibe os dados na tela para mapearmos os campos do operador
     return NextResponse.json({ 
       success: true, 
       message: 'Conexão com RD Conversas feita com sucesso!',
-      total_encontrado: dadosRD.length || 'Os dados não vieram em formato de lista pura. Veja a estrutura abaixo.',
       amostra_dados: dadosRD 
     });
 
-  } catch (error) {
-    console.error('Erro geral no sistema:', error);
+  } catch (error: any) {
+    // Se tropeçar em qualquer linha, mostra ONDE e PORQUE tropeçou
     return NextResponse.json(
-      { error: 'Erro interno no servidor' }, 
+      { error: 'Ocorreu uma falha no código', detalhe_do_erro: error.message || String(error) }, 
       { status: 500 }
     );
   }
