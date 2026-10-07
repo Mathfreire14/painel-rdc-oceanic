@@ -1,5 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 
+// Força a Vercel a sempre buscar dados novos no banco a cada acesso (sem cache estático)
+export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
 export default async function DashboardPage() {
@@ -7,34 +9,48 @@ export default async function DashboardPage() {
   let totalEnviadas = 0;
   let totalRecebidas = 0;
   let operadores: any[] = [];
-  let erro: string | null = null;
+  let erroMsg: string | null = null;
 
-  try {
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+  // Busca variáveis testando todas as variações de nomes possíveis no ambiente
+  const supabaseUrl = 
+    process.env.NEXT_PUBLIC_SUPABASE_URL || 
+    process.env.SUPABASE_URL || 
+    '';
 
-    if (!supabaseUrl || !supabaseKey) {
-      erro = 'Variáveis de ambiente do Supabase não encontradas na Vercel.';
-    } else {
+  const supabaseKey = 
+    process.env.SUPABASE_SERVICE_ROLE_KEY || 
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 
+    process.env.SUPABASE_ANON_KEY || 
+    process.env.SUPABASE_KEY || 
+    '';
+
+  if (!supabaseUrl || !supabaseKey) {
+    erroMsg = `Variáveis do Supabase ausentes na Vercel. (URL detectada: ${supabaseUrl ? 'OK' : 'Ausente'}, KEY detectada: ${supabaseKey ? 'OK' : 'Ausente'})`;
+  } else {
+    try {
       const supabase = createClient(supabaseUrl, supabaseKey);
 
+      // Consulta as views criadas no Supabase
       const [resVol, resOp] = await Promise.all([
         supabase.from('vw_volumetria_diaria').select('*'),
         supabase.from('vw_performance_operadores').select('*')
       ]);
 
-      if (resVol.data) {
-        totalAtendimentos = resVol.data.reduce((acc, item) => acc + Number(item.total_atendimentos || 0), 0);
-        totalEnviadas = resVol.data.reduce((acc, item) => acc + Number(item.total_enviadas || 0), 0);
-        totalRecebidas = resVol.data.reduce((acc, item) => acc + Number(item.total_recebidas || 0), 0);
+      if (resVol.error) console.error('Erro ao consultar volumetria:', resVol.error);
+      if (resOp.error) console.error('Erro ao consultar operadores:', resOp.error);
+
+      if (resVol.data && resVol.data.length > 0) {
+        totalAtendimentos = resVol.data.reduce((acc: number, item: any) => acc + Number(item.total_atendimentos || 0), 0);
+        totalEnviadas = resVol.data.reduce((acc: number, item: any) => acc + Number(item.total_enviadas || 0), 0);
+        totalRecebidas = resVol.data.reduce((acc: number, item: any) => acc + Number(item.total_recebidas || 0), 0);
       }
 
       if (resOp.data) {
         operadores = resOp.data;
       }
+    } catch (err: any) {
+      erroMsg = `Erro na conexão com Supabase: ${err.message || String(err)}`;
     }
-  } catch (err: any) {
-    erro = err.message || 'Erro ao conectar ao Supabase';
   }
 
   return (
@@ -42,9 +58,9 @@ export default async function DashboardPage() {
       <h1 style={{ color: '#1a202c', marginBottom: '8px' }}>Dashboard de Operações - Grupo Oceanic</h1>
       <p style={{ color: '#718096', marginBottom: '30px' }}>Acompanhamento de volumetria e performance dos operadores em tempo real.</p>
 
-      {erro && (
-        <div style={{ padding: '15px', backgroundColor: '#fed7d7', color: '#9b2c2c', borderRadius: '8px', marginBottom: '20px' }}>
-          {erro}
+      {erroMsg && (
+        <div style={{ padding: '15px', backgroundColor: '#fed7d7', color: '#9b2c2c', borderRadius: '8px', marginBottom: '20px', border: '1px solid #feb2b2' }}>
+          <strong>Aviso de Configuração:</strong> {erroMsg}
         </div>
       )}
 
@@ -93,7 +109,7 @@ export default async function DashboardPage() {
             ) : (
               <tr>
                 <td colSpan={5} style={{ padding: '20px', textAlign: 'center', color: '#718096' }}>
-                  Nenhum registro de operador encontrado.
+                  Nenhum registro de operador encontrado no Supabase.
                 </td>
               </tr>
             )}
