@@ -1,19 +1,15 @@
 import { createClient } from '@supabase/supabase-js';
 
-// Conexão com o Supabase
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 const supabase = createClient(supabaseUrl, supabaseKey);
 
-// Desativa o cache estático para a página refletir dados atualizados
 export const revalidate = 0;
 
 export default async function DashboardPage() {
-  // 1. Busca dados das Views SQL que criamos
   const { data: volumetria } = await supabase.from('vw_volumetria_diaria').select('*');
   const { data: operadores } = await supabase.from('vw_performance_operadores').select('*');
 
-  // 2. Calcula Totais para os Cards de KPI
   const totalAtendimentos = volumetria?.reduce((acc, item) => acc + Number(item.total_atendimentos || 0), 0) || 0;
   const totalEnviadas = volumetria?.reduce((acc, item) => acc + Number(item.total_enviadas || 0), 0) || 0;
   const totalRecebidas = volumetria?.reduce((acc, item) => acc + Number(item.total_recebidas || 0), 0) || 0;
