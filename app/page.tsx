@@ -1,8 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
 
-export const dynamic = 'force-dynamic';
-export const revalidate = 0;
-
 export default async function DashboardPage() {
   let totalAtendimentos = 0;
   let totalEnviadas = 0;
@@ -22,7 +19,7 @@ export default async function DashboardPage() {
     '';
 
   if (!supabaseUrl || !supabaseKey) {
-    erroMsg = `Variáveis do Supabase ausentes na Vercel.`;
+    erroMsg = 'Variáveis do Supabase ausentes na Vercel.';
   } else {
     try {
       const supabase = createClient(supabaseUrl, supabaseKey);
