@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import * as jose from 'jose';
 
-// Chave JWK Privada fictícia para desencriptação RSA-OAEP-256
 const PRIVATE_JWK = {
   kty: "RSA",
   kid: "ZlhQ0E-7U-bsY6-WyaU_FqKwQRmySoq7e3EDl-hZwhk",
@@ -17,72 +16,58 @@ const PRIVATE_JWK = {
   qi: "oFEzk4f-OfCF3PAAAvwyU3fL82FMaFu32_GTl3e9gGEfSswpd1q-aWKz03YvEJU8LZzSHbtD7fBqTmzra81VMjA_a1QBl1UBVX0JzYcpq_mHHTYPGUTh-R9wC0CYuqdj57Ehgu1tQBFqscKwYa3ftkN-9jylYHPxSdgoHb88Z6U"
 };
 
-/**
- * Função utilitária para sanitizar strings JSON que contêm caracteres de controle não escapados 
- * ou quebras de linha brutas enviadas pela API da RD Conversas.
- */
-function sanitizarJsonString(rawStr: string): string {
-  if (!rawStr) return '';
-  return rawStr
-    // Substitui quebras de linha reais dentro dos valores por \n sanitizado
-    .replace(/\r?\n/g, '\\n')
-    // Substitui tabulações
-    .replace(/\t/g, '\\t')
-    // Remove caracteres de controle ASCII não imprimíveis (0x00-0x1F) mantendo unicode
-    .replace(/[\u0000-\u0008\u000B-\u000C\u000E-\u001F]/g, '');
-}
-
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const token = body.token || body.messages;
+    let token = body.token || body.messages;
 
     if (!token) {
-      return NextResponse.json(
-        { error: 'Token JWE não fornecido no corpo da requisição.' }, 
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'Token não fornecido' }, { status: 400 });
     }
 
-    // Se a entrada já for um array/objeto estruturado (sem encriptação)
+    // Se já for um objeto/array JS processado
     if (typeof token === 'object') {
       return NextResponse.json(token);
     }
 
-    let payloadDesencriptado = '';
+    let textoProcessado = String(token).trim();
 
-    // Tenta desencriptar caso venha como uma string JWE (ex: eyJhbGci...)
-    if (typeof token === 'string' && token.startsWith('eyJ')) {
+    // Desencriptação JWE se começar por eyJ
+    if (textoProcessado.startsWith('eyJ')) {
       try {
         const privateKey = await jose.importJWK(PRIVATE_JWK, 'RSA-OAEP-256');
-        const { plaintext } = await jose.compactDecrypt(token, privateKey);
-        payloadDesencriptado = new TextDecoder().decode(plaintext);
-      } catch (decryptErr: any) {
-        console.warn('Payload não pôde ser desencriptado via JWE (tentando parse direto):', decryptErr.message);
-        payloadDesencriptado = token;
+        const { plaintext } = await jose.compactDecrypt(textoProcessado, privateKey);
+        textoProcessado = new TextDecoder().decode(plaintext);
+      } catch (e: any) {
+        console.error('Erro na desencriptação JWE:', e.message);
       }
-    } else {
-      payloadDesencriptado = token;
     }
 
-    // Processamento e sanitização de segurança antes de efetuar o parse JSON
-    try {
-      // 1. Tenta parse direto
-      const parsed = JSON.parse(payloadDesencriptado);
-      return NextResponse.json(parsed);
-    } catch (parseErrorFirst: any) {
-      console.warn('Primeira tentativa de parse falhou, aplicando sanitização de caracteres...');
+    // Se após a desencriptação continuar a ser um objeto/array formatado como string
+    if (typeof textoProcessado === 'string') {
+      // Sanitização de quebras de linha e caracteres de controlo ASCII que quebram o JSON.parse
+      const textoLimpo = textoProcessado
+        .replace(/[\u0000-\u001F\u007F-\u009F]/g, (match) => {
+          if (match === '\n') return '\\n';
+          if (match === '\r') return '\\r';
+          if (match === '\t') return '\\t';
+          return '';
+        });
 
-      // 2. Tenta parse sanitizado
-      const textoSanitizado = sanitizarJsonString(payloadDesencriptado);
-      const parsedSanitizado = JSON.parse(textoSanitizado);
-      return NextResponse.json(parsedSanitizado);
+      try {
+        const jsonParsed = JSON.parse(textoLimpo);
+        return NextResponse.json(jsonParsed);
+      } catch (errParse: any) {
+        // Se ainda assim o parse falhar, devolve o texto bruto envolvido em estrutura válida
+        return NextResponse.json({ raw_text: textoProcessado }, { status: 200 });
+      }
     }
+
+    return NextResponse.json(textoProcessado);
 
   } catch (err: any) {
-    console.error('Erro crítico no endpoint de desencriptação:', err);
     return NextResponse.json({ 
-      error: 'A API da RD enviou caracteres inválidos', 
+      error: 'Erro na API de desencriptação', 
       detalhe: err.message 
     }, { status: 500 });
   }
