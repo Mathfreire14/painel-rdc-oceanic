@@ -1,6 +1,10 @@
 import { createClient } from '@supabase/supabase-js';
+import { connection } from 'next/server';
 
 export default async function DashboardPage() {
+  // Avisa ao Next.js 16/Turbopack que esta rota depende de conexão de dados em runtime
+  await connection();
+
   let totalAtendimentos = 0;
   let totalEnviadas = 0;
   let totalRecebidas = 0;
