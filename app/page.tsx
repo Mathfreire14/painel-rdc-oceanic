@@ -1,18 +1,36 @@
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-const supabase = createClient(supabaseUrl, supabaseKey);
-
 export const revalidate = 0;
 
 export default async function DashboardPage() {
-  const { data: volumetria } = await supabase.from('vw_volumetria_diaria').select('*');
-  const { data: operadores } = await supabase.from('vw_performance_operadores').select('*');
+  let totalAtendimentos = 0;
+  let totalEnviadas = 0;
+  let totalRecebidas = 0;
+  let operadores: any[] = [];
 
-  const totalAtendimentos = volumetria?.reduce((acc, item) => acc + Number(item.total_atendimentos || 0), 0) || 0;
-  const totalEnviadas = volumetria?.reduce((acc, item) => acc + Number(item.total_enviadas || 0), 0) || 0;
-  const totalRecebidas = volumetria?.reduce((acc, item) => acc + Number(item.total_recebidas || 0), 0) || 0;
+  try {
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+    
+    if (supabaseUrl && supabaseKey) {
+      const supabase = createClient(supabaseUrl, supabaseKey);
+      
+      const { data: volumetria } = await supabase.from('vw_volumetria_diaria').select('*');
+      const { data: opsData } = await supabase.from('vw_performance_operadores').select('*');
+
+      if (volumetria) {
+        totalAtendimentos = volumetria.reduce((acc, item) => acc + Number(item.total_atendimentos || 0), 0);
+        totalEnviadas = volumetria.reduce((acc, item) => acc + Number(item.total_enviadas || 0), 0);
+        totalRecebidas = volumetria.reduce((acc, item) => acc + Number(item.total_recebidas || 0), 0);
+      }
+
+      if (opsData) {
+        operadores = opsData;
+      }
+    }
+  } catch (err) {
+    console.error('Erro ao carregar dados:', err);
+  }
 
   return (
     <div style={{ padding: '30px', fontFamily: 'sans-serif', backgroundColor: '#f4f6f8', minHeight: '100vh' }}>
@@ -51,15 +69,23 @@ export default async function DashboardPage() {
             </tr>
           </thead>
           <tbody>
-            {operadores && operadores.map((op: any) => (
-              <tr key={op.operador_id} style={{ borderBottom: '1px solid #edf2f7' }}>
-                <td style={{ padding: '12px', fontWeight: 'bold' }}>{op.operador_nome}</td>
-                <td style={{ padding: '12px' }}>{op.total_atendimentos}</td>
-                <td style={{ padding: '12px', color: '#2f855a', fontWeight: 'bold' }}>{op.mensagens_enviadas}</td>
-                <td style={{ padding: '12px', color: '#c53030' }}>{op.mensagens_recebidas}</td>
-                <td style={{ padding: '12px' }}>{op.percentual_respostas}%</td>
+            {operadores.length > 0 ? (
+              operadores.map((op: any) => (
+                <tr key={op.operador_id} style={{ borderBottom: '1px solid #edf2f7' }}>
+                  <td style={{ padding: '12px', fontWeight: 'bold' }}>{op.operador_nome}</td>
+                  <td style={{ padding: '12px' }}>{op.total_atendimentos}</td>
+                  <td style={{ padding: '12px', color: '#2f855a', fontWeight: 'bold' }}>{op.mensagens_enviadas}</td>
+                  <td style={{ padding: '12px', color: '#c53030' }}>{op.mensagens_recebidas}</td>
+                  <td style={{ padding: '12px' }}>{op.percentual_respostas}%</td>
+                </tr>
+              ))
+            ) : (
+              <tr>
+                <td colSpan={5} style={{ padding: '12px', textAlign: 'center', color: '#718096' }}>
+                  A carregar dados dos operadores...
+                </td>
               </tr>
-            ))}
+            )}
           </tbody>
         </table>
       </div>
