@@ -13,7 +13,6 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'Token do RD Conversas não configurado.' }, { status: 500 });
     }
 
-    // Periodo: ultimos 7 dias ate hoje no fuso do Brasil
     const dataAtualBr = new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' });
     const dataSeteDiasAtras = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' });
 
@@ -41,8 +40,9 @@ export async function GET(request: Request) {
 
     let operadoresInseridos = 0;
     let registrosProcessados = 0;
+    let errosSupabase: any[] = [];
 
-    // Passo A: Primeiro garante que TODOS os operadores existem no Supabase
+    // 1. Garante que todos os operadores existem
     for (const item of relatorios) {
       if (item.employee?.id) {
         await supabase.from('operadores').upsert({
@@ -54,7 +54,7 @@ export async function GET(request: Request) {
       }
     }
 
-    // Passo B: Grava o historico de atendimentos
+    // 2. Grava histórico com relatório de erros detalhado
     for (const item of relatorios) {
       const idAtendimento = item.id;
       const operadorId = item.employee?.id || null;
@@ -62,8 +62,7 @@ export async function GET(request: Request) {
       const tipoMensagem = item.channel || 'whatsapp';
       const direcao = item.initiation_info?.initiated_by === 'customer' ? 'recebida' : 'enviada';
 
-      // Monta objeto com fallback para campos opcionais
-      const payload: any = {
+      const payload = {
         id: idAtendimento,
         operador_id: operadorId,
         telefone_cliente: telefoneCliente,
@@ -76,17 +75,20 @@ export async function GET(request: Request) {
       if (!errorMensagem) {
         registrosProcessados++;
       } else {
-        console.error(`Erro ao salvar atendimento ${idAtendimento}:`, errorMensagem);
+        errosSupabase.push({
+          id_atendimento: idAtendimento,
+          payload_enviado: payload,
+          erro_retornado: errorMensagem
+        });
       }
     }
 
     return NextResponse.json({ 
-      success: true, 
-      message: 'Sincronização concluída com sucesso!',
-      periodo: { startDate, endDate },
-      total_encontrado: dadosRD.total || relatorios.length,
+      success: registrosProcessados > 0, 
       registros_processados: registrosProcessados,
-      operadores_mapeados: operadoresInseridos
+      operadores_mapeados: operadoresInseridos,
+      total_erros: errosSupabase.length,
+      primeiro_erro_detalhado: errosSupabase.length > 0 ? errosSupabase[0] : null
     });
 
   } catch (error: any) {
