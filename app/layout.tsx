@@ -1,3 +1,10 @@
+import './globals.css';
+
+export const metadata = {
+  title: 'Painel RDC Oceanic',
+  description: 'Dashboard de Analytics e Consumo do WhatsApp',
+};
+
 export default function RootLayout({
   children,
 }: {
@@ -5,7 +12,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="pt-BR" suppressHydrationWarning>
-      <body style={{ margin: 0, padding: 0 }} suppressHydrationWarning>
+      <body className="bg-slate-950 text-slate-100 antialiased" suppressHydrationWarning>
         {children}
       </body>
     </html>
