@@ -38,23 +38,33 @@ export async function GET(request: Request) {
     const dadosRD = await rdResponse.json();
     const relatorios = dadosRD.docs || [];
 
-    let operadoresInseridos = 0;
-    let registrosProcessados = 0;
-    let errosSupabase: any[] = [];
-
-    // 1. Garante que os operadores existem na tabela 'operadores'
+    // 1. Extrai operadores únicos da lista de relatórios
+    const operadoresMap = new Map();
     for (const item of relatorios) {
       if (item.employee?.id) {
-        await supabase.from('operadores').upsert({
+        operadoresMap.set(item.employee.id, {
           id: item.employee.id,
           nome: item.employee.name,
-          updated_at: new Date().toISOString()
-        }, { onConflict: 'id' });
-        operadoresInseridos++;
+          email: '', // Preenche com vazio para respeitar o schema
+          ativo: true,
+          data_criacao: new Date().toISOString()
+        });
       }
     }
 
-    // 2. Tenta gravar mensagens e captura o erro se falhar
+    // 2. Grava TODOS os operadores no Supabase e AGUARDA a conclusão total
+    const listaOperadores = Array.from(operadoresMap.values());
+    if (listaOperadores.length > 0) {
+      const { error: errorOp } = await supabase.from('operadores').upsert(listaOperadores, { onConflict: 'id' });
+      if (errorOp) {
+        return NextResponse.json({ error: 'Erro ao salvar operadores', detalhe: errorOp }, { status: 500 });
+      }
+    }
+
+    let registrosProcessados = 0;
+    let errosSupabase: any[] = [];
+
+    // 3. Grava as mensagens garantindo que os operadores já existem no banco
     for (const item of relatorios) {
       const idAtendimento = item.id;
       const operadorId = item.employee?.id || null;
@@ -96,7 +106,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ 
       success: registrosProcessados > 0, 
       registros_processados: registrosProcessados,
-      operadores_mapeados: operadoresInseridos,
+      operadores_mapeados: listaOperadores.length,
       total_erros: errosSupabase.length,
       primeiro_erro: errosSupabase.length > 0 ? errosSupabase[0] : null
     });
