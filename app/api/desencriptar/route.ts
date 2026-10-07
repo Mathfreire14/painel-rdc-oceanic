@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import * as jose from 'jose';
 
-// Chave Privada JWK (Fornecida pela RD Conversas)
+// 1. COLE A SUA CHAVE PRIVADA AQUI
 const jwkChavePrivada = {
   "kty": "RSA",
   "kid": "KD2u4yB-JagUKzlhwITLObIIgfLd8jNluKEAvEE9wrc",
@@ -20,8 +20,6 @@ const jwkChavePrivada = {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    
-    // Removemos possíveis quebras de linha ou espaços que o n8n possa enviar no token
     const jweToken = body.token ? body.token.replace(/\s+/g, '') : null;
     const telefone = body.telefone;
     const id_cliente = body.id_cliente;
@@ -30,20 +28,37 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Token JWE não fornecido' }, { status: 400 });
     }
 
-    // Importa a chave JWK usando a biblioteca jose
     const privateKey = await jose.importJWK(jwkChavePrivada, 'RSA-OAEP-256');
-
-    // Desencripta o token de forma segura
     const { plaintext } = await jose.compactDecrypt(jweToken, privateKey);
-    
-    // Converte o resultado de bytes (Buffer) para uma string de texto legível
     const decryptedString = new TextDecoder().decode(plaintext);
 
+    let historicoParseado;
+    try {
+      // Tenta limpar quebras de linha e caracteres invisíveis que partem o JSON
+      const cleanString = decryptedString
+        .replace(/[\u0000-\u0009\u000B-\u001F]/g, '') // Remove invisíveis (exceto o Enter \n)
+        .replace(/\n/g, '\\n') // Escapa os Enters
+        .replace(/\r/g, '\\r') // Escapa retornos de carro
+        .replace(/\t/g, '\\t'); // Escapa tabulações
+
+      historicoParseado = JSON.parse(cleanString);
+    } catch (parseError: any) {
+      // SE FALHAR A CONVERSÃO PARA JSON, DEVOLVEMOS-LHE O TEXTO BRUTO DAS MENSAGENS!
+      return NextResponse.json({
+        error: 'A API da RD enviou caracteres inválidos',
+        detalhe: parseError.message,
+        id_cliente: id_cliente,
+        telefone: telefone,
+        texto_bruto_desencriptado: decryptedString // O "Santo Graal" limpo para podermos ler!
+      }, { status: 500 });
+    }
+
+    // Sucesso absoluto
     return NextResponse.json({ 
       success: true, 
       id_cliente: id_cliente,
       telefone: telefone,
-      historico: JSON.parse(decryptedString) 
+      historico: historicoParseado 
     });
 
   } catch (error: any) {
