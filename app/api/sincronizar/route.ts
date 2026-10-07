@@ -13,18 +13,18 @@ export async function GET(request: Request) {
 
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // 1. Calcula as datas automaticamente (Início do dia de hoje até o momento atual)
+    // 1. Pega a data atual no formato simples YYYY-MM-DD (fuso local)
     const agora = new Date();
-    const inicioDoDia = new Date(agora.getFullYear(), agora.getMonth(), agora.getDate());
-
-    // Formato exigido pela API (YYYY-MM-DDTHH:mm:ss.sssZ ou YYYY-MM-DD)
-    const startDate = inicioDoDia.toISOString();
-    const endDate = agora.toISOString();
-
-    // 2. Monta a URL com os parâmetros de data exigidos pela API
-    const rdUrl = `https://api.tallos.com.br/v4/reports?start_date=${encodeURIComponent(startDate)}&end_date=${encodeURIComponent(endDate)}`;
+    const ano = agora.getFullYear();
+    const mes = String(agora.getMonth() + 1).padStart(2, '0');
+    const dia = String(agora.getDate()).padStart(2, '0');
     
-    console.log(`Buscando relatórios de ${startDate} até ${endDate}...`);
+    const dataFormatada = `${ano}-${mes}-${dia}`;
+
+    // 2. Monta a URL passando o dia de hoje nos dois parâmetros
+    const rdUrl = `https://api.tallos.com.br/v4/reports?start_date=${dataFormatada}&end_date=${dataFormatada}`;
+    
+    console.log(`Buscando relatórios para a data: ${dataFormatada}...`);
 
     const rdResponse = await fetch(rdUrl, {
       method: 'GET',
@@ -49,7 +49,7 @@ export async function GET(request: Request) {
 
     return NextResponse.json({ 
       success: true, 
-      periodo_consultado: { startDate, endDate },
+      data_consultada: dataFormatada,
       total_registros: Array.isArray(dadosRD) ? dadosRD.length : 'Estrutura de objeto',
       amostra_dados: dadosRD 
     });
