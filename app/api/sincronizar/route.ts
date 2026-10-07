@@ -40,6 +40,7 @@ export async function GET(request: Request) {
 
     let operadoresInseridos = 0;
     let registrosProcessados = 0;
+    let errosSupabase: any[] = [];
 
     // 1. Garante que os operadores existem na tabela 'operadores'
     for (const item of relatorios) {
@@ -53,14 +54,22 @@ export async function GET(request: Request) {
       }
     }
 
-    // 2. Grava atendimentos incluindo o campo 'data_envio' obrigatorio
+    // 2. Tenta gravar mensagens e captura o erro se falhar
     for (const item of relatorios) {
       const idAtendimento = item.id;
       const operadorId = item.employee?.id || null;
       const telefoneCliente = item.customer?.cel_phone || '';
       const tipoMensagem = item.channel || 'whatsapp';
       const direcao = item.initiation_info?.initiated_by === 'customer' ? 'recebida' : 'enviada';
-      const dataEnvio = item.opened_at || item.created_at || new Date().toISOString();
+      
+      let dataEnvio = new Date().toISOString();
+      if (item.opened_at || item.created_at) {
+        try {
+          dataEnvio = new Date(item.opened_at || item.created_at).toISOString();
+        } catch (e) {
+          dataEnvio = new Date().toISOString();
+        }
+      }
 
       const payload = {
         id: idAtendimento,
@@ -75,14 +84,21 @@ export async function GET(request: Request) {
 
       if (!errorMensagem) {
         registrosProcessados++;
+      } else {
+        errosSupabase.push({
+          id_atendimento: idAtendimento,
+          payload_enviado: payload,
+          erro: errorMensagem
+        });
       }
     }
 
     return NextResponse.json({ 
-      success: true, 
-      message: 'Sincronização concluída com sucesso!',
+      success: registrosProcessados > 0, 
       registros_processados: registrosProcessados,
-      operadores_mapeados: operadoresInseridos
+      operadores_mapeados: operadoresInseridos,
+      total_erros: errosSupabase.length,
+      primeiro_erro: errosSupabase.length > 0 ? errosSupabase[0] : null
     });
 
   } catch (error: any) {
