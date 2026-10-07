@@ -45,7 +45,7 @@ export async function GET(request: Request) {
         operadoresMap.set(item.employee.id, {
           id: item.employee.id,
           nome: item.employee.name,
-          email: '', // Preenche com vazio para respeitar o schema
+          email: '', 
           ativo: true,
           data_criacao: new Date().toISOString()
         });
@@ -64,7 +64,7 @@ export async function GET(request: Request) {
     let registrosProcessados = 0;
     let errosSupabase: any[] = [];
 
-    // 3. Grava as mensagens garantindo que os operadores já existem no banco
+    // 3. Grava as mensagens com a nova categorização da Meta
     for (const item of relatorios) {
       const idAtendimento = item.id;
       const operadorId = item.employee?.id || null;
@@ -81,13 +81,41 @@ export async function GET(request: Request) {
         }
       }
 
+      // --- NOVA LÓGICA DE CLASSIFICAÇÃO DA META ---
+      // Verifica se a API da Tallos marca como template, hsm ou se possui template_id
+      const isTemplate = item.is_template === true || item.type === 'hsm' || item.type === 'template' || item.template_id != null || false;
+      
+      let categoriaMeta = 'servico'; // Padrão: texto livre / receptivo
+      
+      if (isTemplate) {
+        // Tenta inferir a categoria exata do template caso a API forneça
+        const catApi = (item.category || item.template_category || '').toLowerCase();
+        if (catApi.includes('utility')) {
+            categoriaMeta = 'utilidade';
+        } else if (catApi.includes('auth')) {
+            categoriaMeta = 'autenticacao';
+        } else {
+            categoriaMeta = 'marketing'; // Por precaução financeira, templates não identificados vão para o custo mais alto
+        }
+      }
+
+      // Verifica se a origem foi anúncio (janela de 72h gratuita)
+      const isClickToWa = item.is_click_to_wa === true || item.source === 'ads' || false;
+      if (isClickToWa) {
+          categoriaMeta = 'gratis_click_to_wa';
+      }
+      // ---------------------------------------------
+
       const payload = {
         id: idAtendimento,
         operador_id: operadorId,
         telefone_cliente: telefoneCliente,
         tipo_mensagem: tipoMensagem,
         direcao: direcao,
-        data_envio: dataEnvio
+        data_envio: dataEnvio,
+        is_template: isTemplate,
+        categoria_meta: categoriaMeta,
+        eh_click_to_whatsapp: isClickToWa
       };
 
       const { error: errorMensagem } = await supabase.from('mensagens').upsert(payload, { onConflict: 'id' });
