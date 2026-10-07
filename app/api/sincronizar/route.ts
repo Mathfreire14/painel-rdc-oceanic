@@ -1,6 +1,9 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
 
+// Desativa o cache da Vercel para esta rota, garantindo que rode sempre em tempo real
+export const dynamic = 'force-dynamic';
+
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 const supabase = createClient(supabaseUrl, supabaseKey);
@@ -45,7 +48,7 @@ export async function GET(request: Request) {
         operadoresMap.set(item.employee.id, {
           id: item.employee.id,
           nome: item.employee.name,
-          email: '', // Preenche com vazio para respeitar o schema
+          email: '', 
           ativo: true,
           data_criacao: new Date().toISOString()
         });
@@ -82,13 +85,11 @@ export async function GET(request: Request) {
       }
 
       // --- LÓGICA DE CLASSIFICAÇÃO DA META ---
-      // Verifica se a API da Tallos marca como template, hsm ou se possui template_id
       const isTemplate = item.is_template === true || item.type === 'hsm' || item.type === 'template' || item.template_id != null || false;
       
-      let categoriaMeta = 'servico'; // Padrão: texto livre / receptivo
+      let categoriaMeta = 'servico'; 
       
       if (isTemplate) {
-        // Tenta inferir a categoria exata do template caso a API forneça
         const catApi = (item.category || item.template_category || '').toLowerCase();
         if (catApi.includes('utility')) {
             categoriaMeta = 'utilidade';
@@ -99,7 +100,6 @@ export async function GET(request: Request) {
         }
       }
 
-      // Verifica se a origem foi anúncio (janela de 72h gratuita)
       const isClickToWa = item.is_click_to_wa === true || item.source === 'ads' || false;
       if (isClickToWa) {
           categoriaMeta = 'gratis_click_to_wa';
@@ -137,7 +137,7 @@ export async function GET(request: Request) {
       operadores_mapeados: listaOperadores.length,
       total_erros: errosSupabase.length,
       primeiro_erro: errosSupabase.length > 0 ? errosSupabase[0] : null,
-      amostra_json_tallos: relatorios.slice(0, 3) // <--- Lógica de extração do JSON injetada aqui
+      amostra_json_tallos: relatorios.slice(0, 3) // Retorna as 3 últimas mensagens reais da RD/Tallos
     });
 
   } catch (error: any) {
