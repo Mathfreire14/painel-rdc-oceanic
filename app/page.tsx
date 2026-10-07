@@ -1,69 +1,68 @@
-import Image from "next/image";
+import { createClient } from '@supabase/supabase-js';
 
-export default function Home() {
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+const supabase = createClient(supabaseUrl, supabaseKey);
+
+export const revalidate = 0;
+
+export default async function DashboardPage() {
+  const { data: volumetria } = await supabase.from('vw_volumetria_diaria').select('*');
+  const { data: operadores } = await supabase.from('vw_performance_operadores').select('*');
+
+  const totalAtendimentos = volumetria?.reduce((acc, item) => acc + Number(item.total_atendimentos || 0), 0) || 0;
+  const totalEnviadas = volumetria?.reduce((acc, item) => acc + Number(item.total_enviadas || 0), 0) || 0;
+  const totalRecebidas = volumetria?.reduce((acc, item) => acc + Number(item.total_recebidas || 0), 0) || 0;
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <div style={{ padding: '30px', fontFamily: 'sans-serif', backgroundColor: '#f4f6f8', minHeight: '100vh' }}>
+      <h1 style={{ color: '#1a202c', marginBottom: '8px' }}>Dashboard de Operações - Grupo Oceanic</h1>
+      <p style={{ color: '#718096', marginBottom: '30px' }}>Acompanhamento de volumetria e performance dos operadores em tempo real.</p>
+
+      {/* CARDS DE KPIS */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '20px', marginBottom: '30px' }}>
+        <div style={{ background: '#fff', padding: '20px', borderRadius: '10px', boxShadow: '0 2px 4px rgba(0,0,0,0.05)' }}>
+          <span style={{ fontSize: '14px', color: '#718096' }}>Total de Atendimentos</span>
+          <h2 style={{ fontSize: '28px', color: '#2b6cb0', margin: '10px 0 0 0' }}>{totalAtendimentos}</h2>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+        
+        <div style={{ background: '#fff', padding: '20px', borderRadius: '10px', boxShadow: '0 2px 4px rgba(0,0,0,0.05)' }}>
+          <span style={{ fontSize: '14px', color: '#718096' }}>Mensagens Enviadas (Operadores)</span>
+          <h2 style={{ fontSize: '28px', color: '#2f855a', margin: '10px 0 0 0' }}>{totalEnviadas}</h2>
         </div>
-      </main>
+
+        <div style={{ background: '#fff', padding: '20px', borderRadius: '10px', boxShadow: '0 2px 4px rgba(0,0,0,0.05)' }}>
+          <span style={{ fontSize: '14px', color: '#718096' }}>Mensagens Recebidas</span>
+          <h2 style={{ fontSize: '28px', color: '#c53030', margin: '10px 0 0 0' }}>{totalRecebidas}</h2>
+        </div>
+      </div>
+
+      {/* TABELA DE PERFORMANCE POR OPERADOR */}
+      <div style={{ background: '#fff', padding: '24px', borderRadius: '10px', boxShadow: '0 2px 4px rgba(0,0,0,0.05)' }}>
+        <h3 style={{ marginTop: 0, marginBottom: '20px', color: '#2d3748' }}>Desempenho por Operador</h3>
+        <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+          <thead>
+            <tr style={{ borderBottom: '2px solid #edf2f7', color: '#4a5568' }}>
+              <th style={{ padding: '12px' }}>Operador</th>
+              <th style={{ padding: '12px' }}>Total de Atendimentos</th>
+              <th style={{ padding: '12px' }}>Mensagens Enviadas</th>
+              <th style={{ padding: '12px' }}>Mensagens Recebidas</th>
+              <th style={{ padding: '12px' }}>Taxa de Resposta (%)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {operadores && operadores.map((op: any) => (
+              <tr key={op.operador_id} style={{ borderBottom: '1px solid #edf2f7' }}>
+                <td style={{ padding: '12px', fontWeight: 'bold' }}>{op.operador_nome}</td>
+                <td style={{ padding: '12px' }}>{op.total_atendimentos}</td>
+                <td style={{ padding: '12px', color: '#2f855a', fontWeight: 'bold' }}>{op.mensagens_enviadas}</td>
+                <td style={{ padding: '12px', color: '#c53030' }}>{op.mensagens_recebidas}</td>
+                <td style={{ padding: '12px' }}>{op.percentual_respostas}%</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
