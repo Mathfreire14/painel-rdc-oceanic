@@ -13,18 +13,19 @@ export async function GET(request: Request) {
 
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // 1. Pega a data atual no formato simples YYYY-MM-DD (fuso local)
-    const agora = new Date();
-    const ano = agora.getFullYear();
-    const mes = String(agora.getMonth() + 1).padStart(2, '0');
-    const dia = String(agora.getDate()).padStart(2, '0');
+    // 1. Calcula as datas no fuso do Brasil (America/Sao_Paulo)
+    const dataAtualBr = new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' }); // Formato YYYY-MM-DD
     
-    const dataFormatada = `${ano}-${mes}-${dia}`;
+    // Para garantirmos que virão dados de teste, vamos buscar dos últimos 7 dias até hoje
+    const dataSeteDiasAtras = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' });
 
-    // 2. Monta a URL passando o dia de hoje nos dois parâmetros
-    const rdUrl = `https://api.tallos.com.br/v4/reports?start_date=${dataFormatada}&end_date=${dataFormatada}`;
+    const startDate = dataSeteDiasAtras;
+    const endDate = dataAtualBr;
+
+    // 2. Monta a URL da API da Tallos/RD
+    const rdUrl = `https://api.tallos.com.br/v4/reports?start_date=${startDate}&end_date=${endDate}&limit=50`;
     
-    console.log(`Buscando relatórios para a data: ${dataFormatada}...`);
+    console.log(`Buscando relatórios de ${startDate} até ${endDate}...`);
 
     const rdResponse = await fetch(rdUrl, {
       method: 'GET',
@@ -49,9 +50,9 @@ export async function GET(request: Request) {
 
     return NextResponse.json({ 
       success: true, 
-      data_consultada: dataFormatada,
-      total_registros: Array.isArray(dadosRD) ? dadosRD.length : 'Estrutura de objeto',
-      amostra_dados: dadosRD 
+      periodo_consultado: { startDate, endDate },
+      total_encontrado: dadosRD.total || 0,
+      amostra_dados: dadosRD.docs || dadosRD 
     });
 
   } catch (error: any) {
