@@ -13,9 +13,19 @@ export async function GET(request: Request) {
 
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // A URL oficial descoberta na documentação!
-    const rdUrl = 'https://api.tallos.com.br/v4/reports';
+    // 1. Calcula as datas automaticamente (Início do dia de hoje até o momento atual)
+    const agora = new Date();
+    const inicioDoDia = new Date(agora.getFullYear(), agora.getMonth(), agora.getDate());
+
+    // Formato exigido pela API (YYYY-MM-DDTHH:mm:ss.sssZ ou YYYY-MM-DD)
+    const startDate = inicioDoDia.toISOString();
+    const endDate = agora.toISOString();
+
+    // 2. Monta a URL com os parâmetros de data exigidos pela API
+    const rdUrl = `https://api.tallos.com.br/v4/reports?start_date=${encodeURIComponent(startDate)}&end_date=${encodeURIComponent(endDate)}`;
     
+    console.log(`Buscando relatórios de ${startDate} até ${endDate}...`);
+
     const rdResponse = await fetch(rdUrl, {
       method: 'GET',
       headers: {
@@ -26,11 +36,10 @@ export async function GET(request: Request) {
     });
 
     const textoPuro = await rdResponse.text();
-    
-    // Se o RD reclamar de alguma coisa (ex: pedir para informarmos a data do relatório)
+
     if (!rdResponse.ok) {
        return NextResponse.json({ 
-         error: 'A API do RD Conversas respondeu, mas exige parâmetros adicionais', 
+         error: 'A API do RD Conversas retornou erro', 
          status_http: rdResponse.status, 
          detalhes: textoPuro 
        }, { status: rdResponse.status });
@@ -40,7 +49,8 @@ export async function GET(request: Request) {
 
     return NextResponse.json({ 
       success: true, 
-      message: 'Conexão com RD Conversas feita com sucesso!',
+      periodo_consultado: { startDate, endDate },
+      total_registros: Array.isArray(dadosRD) ? dadosRD.length : 'Estrutura de objeto',
       amostra_dados: dadosRD 
     });
 
