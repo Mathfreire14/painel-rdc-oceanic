@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import crypto from 'crypto';
+import * as jose from 'jose';
 
 // 1. COLE A SUA CHAVE PRIVADA AQUI
 const jwkChavePrivada = {
@@ -20,81 +20,33 @@ const jwkChavePrivada = {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const jweToken = body.token;
+    
+    // Removemos possíveis quebras de linha ou espaços que o n8n possa enviar por acidente
+    const jweToken = body.token ? body.token.replace(/\s+/g, '') : null;
     const telefone = body.telefone;
     const id_cliente = body.id_cliente;
 
     if (!jweToken) {
-      return NextResponse.json({ error: 'Token JWE não fornecido', detalhes: "O body.token está vazio" }, { status: 400 });
+      return NextResponse.json({ error: 'Token JWE não fornecido' }, { status: 400 });
     }
 
-    const privateKey = crypto.createPrivateKey({
-      key: jwkChavePrivada,
-      format: 'jwk'
-    });
+    // 2. Importa a chave JWK usando a biblioteca jose
+    const privateKey = await jose.importJWK(jwkChavePrivada, 'RSA-OAEP-256');
 
-    // Função melhorada: Converte Base64Url para Buffer, lidando com padding se necessário.
-    const b64urlToBuffer = (str: string) => {
-        let b64 = str.replace(/-/g, '+').replace(/_/g, '/');
-        while (b64.length % 4) {
-            b64 += '=';
-        }
-        return Buffer.from(b64, 'base64');
-    };
-
-    const parts = jweToken.split('.');
-    if (parts.length !== 5) {
-        throw new Error(`Formato JWE inválido. Esperadas 5 partes, recebidas ${parts.length}.`);
-    }
-
-    const [headerB64, encryptedKeyB64, ivB64, ciphertextB64, tagB64] = parts;
-
-    let cek;
-    try {
-        // Desencripta a CEK (Chave Mestra)
-        const encryptedKey = b64urlToBuffer(encryptedKeyB64);
-        cek = crypto.privateDecrypt({
-            key: privateKey,
-            padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
-            oaepHash: 'sha256'
-        }, encryptedKey);
-    } catch (e: any) {
-        throw new Error(`Erro ao desencriptar a chave CEK (RSA): ${e.message}`);
-    }
-
-    let decrypted;
-    try {
-        // Desencripta as mensagens (AES)
-        const iv = b64urlToBuffer(ivB64);
-        const ciphertext = b64urlToBuffer(ciphertextB64);
-        const tag = b64urlToBuffer(tagB64);
-
-        const decipher = crypto.createDecipheriv('aes-256-gcm', cek, iv);
-        decipher.setAuthTag(tag);
-        
-        decrypted = decipher.update(ciphertext, undefined, 'utf8');
-        decrypted += decipher.final('utf8');
-    } catch (e: any) {
-        throw new Error(`Erro ao desencriptar o payload (AES-GCM): ${e.message}`);
-    }
-
-    // Tenta fazer o parse do JSON resultante
-    let historicoParseado;
-    try {
-        historicoParseado = JSON.parse(decrypted);
-    } catch (e: any) {
-        throw new Error(`Payload desencriptado não é um JSON válido: ${e.message}`);
-    }
+    // 3. A biblioteca faz todo o trabalho de separar as 5 partes, validar o HMAC e usar AES-CBC
+    const { plaintext } = await jose.compactDecrypt(jweToken, privateKey);
+    
+    // 4. Converte o resultado de bytes para uma string de texto legível
+    const decryptedString = new TextDecoder().decode(plaintext);
 
     return NextResponse.json({ 
       success: true, 
       id_cliente: id_cliente,
       telefone: telefone,
-      historico: historicoParseado 
+      historico: JSON.parse(decryptedString) 
     });
 
   } catch (error: any) {
-    // Retorna a mensagem de erro detalhada para vermos exatamente onde falhou
-    return NextResponse.json({ error: 'Falha na descriptografia JWE', detalhe: error.message || String(error) }, { status: 500 });
+    return NextResponse.json({ error: 'Falha na descriptografia JWE', detalhe: error.message }, { status: 500 });
   }
 }
