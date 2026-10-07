@@ -1,48 +1,41 @@
-'use client';
-
-import { useEffect, useState } from 'react';
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+export const revalidate = 0;
 
-export default function DashboardPage() {
-  const [loading, setLoading] = useState(true);
-  const [volumetria, setVolumetria] = useState<any[]>([]);
-  const [operadores, setOperadores] = useState<any[]>([]);
-  const [erro, setErro] = useState<string | null>(null);
+export default async function DashboardPage() {
+  let totalAtendimentos = 0;
+  let totalEnviadas = 0;
+  let totalRecebidas = 0;
+  let operadores: any[] = [];
+  let erro: string | null = null;
 
-  useEffect(() => {
-    async function carregarDados() {
-      try {
-        if (!supabaseUrl || !supabaseKey) {
-          setErro('Variáveis do Supabase não configuradas no cliente.');
-          setLoading(false);
-          return;
-        }
+  try {
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 
-        const supabase = createClient(supabaseUrl, supabaseKey);
+    if (!supabaseUrl || !supabaseKey) {
+      erro = 'Variáveis de ambiente do Supabase não encontradas na Vercel.';
+    } else {
+      const supabase = createClient(supabaseUrl, supabaseKey);
 
-        const [resVol, resOp] = await Promise.all([
-          supabase.from('vw_volumetria_diaria').select('*'),
-          supabase.from('vw_performance_operadores').select('*')
-        ]);
+      const [resVol, resOp] = await Promise.all([
+        supabase.from('vw_volumetria_diaria').select('*'),
+        supabase.from('vw_performance_operadores').select('*')
+      ]);
 
-        if (resVol.data) setVolumetria(resVol.data);
-        if (resOp.data) setOperadores(resOp.data);
-      } catch (err: any) {
-        setErro(err.message || 'Erro ao ligar ao Supabase');
-      } finally {
-        setLoading(false);
+      if (resVol.data) {
+        totalAtendimentos = resVol.data.reduce((acc, item) => acc + Number(item.total_atendimentos || 0), 0);
+        totalEnviadas = resVol.data.reduce((acc, item) => acc + Number(item.total_enviadas || 0), 0);
+        totalRecebidas = resVol.data.reduce((acc, item) => acc + Number(item.total_recebidas || 0), 0);
+      }
+
+      if (resOp.data) {
+        operadores = resOp.data;
       }
     }
-
-    carregarDados();
-  }, []);
-
-  const totalAtendimentos = volumetria.reduce((acc, item) => acc + Number(item.total_atendimentos || 0), 0);
-  const totalEnviadas = volumetria.reduce((acc, item) => acc + Number(item.total_enviadas || 0), 0);
-  const totalRecebidas = volumetria.reduce((acc, item) => acc + Number(item.total_recebidas || 0), 0);
+  } catch (err: any) {
+    erro = err.message || 'Erro ao conectar ao Supabase';
+  }
 
   return (
     <div style={{ padding: '30px', fontFamily: 'sans-serif', backgroundColor: '#f4f6f8', minHeight: '100vh' }}>
@@ -59,17 +52,17 @@ export default function DashboardPage() {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '20px', marginBottom: '30px' }}>
         <div style={{ background: '#fff', padding: '20px', borderRadius: '10px', boxShadow: '0 2px 4px rgba(0,0,0,0.05)' }}>
           <span style={{ fontSize: '14px', color: '#718096' }}>Total de Atendimentos</span>
-          <h2 style={{ fontSize: '28px', color: '#2b6cb0', margin: '10px 0 0 0' }}>{loading ? '...' : totalAtendimentos}</h2>
+          <h2 style={{ fontSize: '28px', color: '#2b6cb0', margin: '10px 0 0 0' }}>{totalAtendimentos}</h2>
         </div>
         
         <div style={{ background: '#fff', padding: '20px', borderRadius: '10px', boxShadow: '0 2px 4px rgba(0,0,0,0.05)' }}>
           <span style={{ fontSize: '14px', color: '#718096' }}>Mensagens Enviadas (Operadores)</span>
-          <h2 style={{ fontSize: '28px', color: '#2f855a', margin: '10px 0 0 0' }}>{loading ? '...' : totalEnviadas}</h2>
+          <h2 style={{ fontSize: '28px', color: '#2f855a', margin: '10px 0 0 0' }}>{totalEnviadas}</h2>
         </div>
 
         <div style={{ background: '#fff', padding: '20px', borderRadius: '10px', boxShadow: '0 2px 4px rgba(0,0,0,0.05)' }}>
           <span style={{ fontSize: '14px', color: '#718096' }}>Mensagens Recebidas</span>
-          <h2 style={{ fontSize: '28px', color: '#c53030', margin: '10px 0 0 0' }}>{loading ? '...' : totalRecebidas}</h2>
+          <h2 style={{ fontSize: '28px', color: '#c53030', margin: '10px 0 0 0' }}>{totalRecebidas}</h2>
         </div>
       </div>
 
@@ -87,11 +80,7 @@ export default function DashboardPage() {
             </tr>
           </thead>
           <tbody>
-            {loading ? (
-              <tr>
-                <td colSpan={5} style={{ padding: '20px', textAlign: 'center', color: '#718096' }}>A carregar dados dos operadores...</td>
-              </tr>
-            ) : operadores.length > 0 ? (
+            {operadores.length > 0 ? (
               operadores.map((op: any) => (
                 <tr key={op.operador_id} style={{ borderBottom: '1px solid #edf2f7' }}>
                   <td style={{ padding: '12px', fontWeight: 'bold' }}>{op.operador_nome}</td>
@@ -103,7 +92,9 @@ export default function DashboardPage() {
               ))
             ) : (
               <tr>
-                <td colSpan={5} style={{ padding: '20px', textAlign: 'center', color: '#718096' }}>Nenhum registo encontrado.</td>
+                <td colSpan={5} style={{ padding: '20px', textAlign: 'center', color: '#718096' }}>
+                  Nenhum registro de operador encontrado.
+                </td>
               </tr>
             )}
           </tbody>
