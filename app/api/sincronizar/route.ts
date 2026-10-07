@@ -13,14 +13,13 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'Token do RD Conversas não configurado.' }, { status: 500 });
     }
 
-    // 1. Define o período no fuso do Brasil (últimos 7 dias até hoje)
+    // Periodo: ultimos 7 dias ate hoje no fuso do Brasil
     const dataAtualBr = new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' });
     const dataSeteDiasAtras = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' });
 
     const startDate = dataSeteDiasAtras;
     const endDate = dataAtualBr;
 
-    // 2. Limit ajustado para 50 conforme exigido pela API
     const rdUrl = `https://api.tallos.com.br/v4/reports?start_date=${startDate}&end_date=${endDate}&limit=50`;
     
     const rdResponse = await fetch(rdUrl, {
@@ -43,9 +42,8 @@ export async function GET(request: Request) {
     let operadoresInseridos = 0;
     let registrosProcessados = 0;
 
-    // 3. Gravação no Supabase
+    // Passo A: Primeiro garante que TODOS os operadores existem no Supabase
     for (const item of relatorios) {
-      // Atualiza ou insere o Operador na tabela 'operadores'
       if (item.employee?.id) {
         await supabase.from('operadores').upsert({
           id: item.employee.id,
@@ -54,25 +52,31 @@ export async function GET(request: Request) {
         }, { onConflict: 'id' });
         operadoresInseridos++;
       }
+    }
 
-      // Mapeia para os campos da sua tabela 'mensagens'
+    // Passo B: Grava o historico de atendimentos
+    for (const item of relatorios) {
       const idAtendimento = item.id;
       const operadorId = item.employee?.id || null;
       const telefoneCliente = item.customer?.cel_phone || '';
       const tipoMensagem = item.channel || 'whatsapp';
       const direcao = item.initiation_info?.initiated_by === 'customer' ? 'recebida' : 'enviada';
 
-      // Grava no Supabase
-      const { error: errorMensagem } = await supabase.from('mensagens').upsert({
+      // Monta objeto com fallback para campos opcionais
+      const payload: any = {
         id: idAtendimento,
         operador_id: operadorId,
         telefone_cliente: telefoneCliente,
         tipo_mensagem: tipoMensagem,
         direcao: direcao
-      }, { onConflict: 'id' });
+      };
+
+      const { error: errorMensagem } = await supabase.from('mensagens').upsert(payload, { onConflict: 'id' });
 
       if (!errorMensagem) {
         registrosProcessados++;
+      } else {
+        console.error(`Erro ao salvar atendimento ${idAtendimento}:`, errorMensagem);
       }
     }
 
