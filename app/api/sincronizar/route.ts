@@ -1,7 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
 
-// Desativa o cache da Vercel para esta rota, garantindo que rode sempre em tempo real
 export const dynamic = 'force-dynamic';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
@@ -12,138 +11,68 @@ export async function GET(request: Request) {
   try {
     const rdToken = process.env.RD_API_TOKEN;
 
-    if (!rdToken) {
-      return NextResponse.json({ error: 'Token do RD Conversas não configurado.' }, { status: 500 });
-    }
+    if (!rdToken) return NextResponse.json({ error: 'Token não configurado.' }, { status: 500 });
 
     const dataAtualBr = new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' });
     const dataSeteDiasAtras = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' });
 
-    const startDate = dataSeteDiasAtras;
-    const endDate = dataAtualBr;
-
-    const rdUrl = `https://api.tallos.com.br/v4/reports?start_date=${startDate}&end_date=${endDate}&limit=50`;
-    
+    const rdUrl = `https://api.tallos.com.br/v4/reports?start_date=${dataSeteDiasAtras}&end_date=${dataAtualBr}&limit=50`;
     const rdResponse = await fetch(rdUrl, {
       method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${rdToken}`,
-        'Content-Type': 'application/json',
-        'Accept': 'application/json'
-      }
+      headers: { 'Authorization': `Bearer ${rdToken}`, 'Content-Type': 'application/json' }
     });
 
-    if (!rdResponse.ok) {
-       const erroTexto = await rdResponse.text();
-       return NextResponse.json({ error: 'Erro ao consultar RD', detalhes: erroTexto }, { status: rdResponse.status });
-    }
+    if (!rdResponse.ok) return NextResponse.json({ error: 'Erro na RD' }, { status: rdResponse.status });
 
     const dadosRD = await rdResponse.json();
     const relatorios = dadosRD.docs || [];
 
-    // 1. Extrai operadores únicos da lista de relatórios
+    // 1. Extrai Operadores (Cria o Bot/IA para atendimentos sem humano)
     const operadoresMap = new Map();
     for (const item of relatorios) {
-      if (item.employee?.id) {
-        operadoresMap.set(item.employee.id, {
-          id: item.employee.id,
-          nome: item.employee.name,
-          email: '', 
-          ativo: true,
-          data_criacao: new Date().toISOString()
-        });
-      }
+      const empId = item.employee?.id || 'bot-ia';
+      const empName = item.employee?.name || 'Bot / Inteligência Artificial';
+      
+      operadoresMap.set(empId, {
+        id: empId,
+        nome: empName,
+        email: '', 
+        ativo: true,
+        data_criacao: new Date().toISOString()
+      });
     }
 
-    // 2. Grava TODOS os operadores no Supabase e AGUARDA a conclusão total
-    const listaOperadores = Array.from(operadoresMap.values());
-    if (listaOperadores.length > 0) {
-      const { error: errorOp } = await supabase.from('operadores').upsert(listaOperadores, { onConflict: 'id' });
-      if (errorOp) {
-        return NextResponse.json({ error: 'Erro ao salvar operadores', detalhe: errorOp }, { status: 500 });
-      }
+    if (operadoresMap.size > 0) {
+      await supabase.from('operadores').upsert(Array.from(operadoresMap.values()), { onConflict: 'id' });
     }
 
     let registrosProcessados = 0;
-    let errosSupabase: any[] = [];
 
-    // 3. Grava as mensagens com a nova categorização da Meta
+    // 2. Processa Atendimentos
     for (const item of relatorios) {
-      const idAtendimento = item.id;
-      const operadorId = item.employee?.id || null;
-      const telefoneCliente = item.customer?.cel_phone || '';
-      const tipoMensagem = item.channel || 'whatsapp';
-      const direcao = item.initiation_info?.initiated_by === 'customer' ? 'recebida' : 'enviada';
-      
-      let dataEnvio = new Date().toISOString();
-      if (item.opened_at || item.created_at) {
-        try {
-          dataEnvio = new Date(item.opened_at || item.created_at).toISOString();
-        } catch (e) {
-          dataEnvio = new Date().toISOString();
-        }
-      }
-
-      // --- LÓGICA DE CLASSIFICAÇÃO DA META ---
-      const isTemplate = item.is_template === true || item.type === 'hsm' || item.type === 'template' || item.template_id != null || false;
-      
-      let categoriaMeta = 'servico'; 
-      
-      if (isTemplate) {
-        const catApi = (item.category || item.template_category || '').toLowerCase();
-        if (catApi.includes('utility')) {
-            categoriaMeta = 'utilidade';
-        } else if (catApi.includes('auth')) {
-            categoriaMeta = 'autenticacao';
-        } else {
-            categoriaMeta = 'marketing'; 
-        }
-      }
-
-      const isClickToWa = item.is_click_to_wa === true || item.source === 'ads' || false;
-      if (isClickToWa) {
-          categoriaMeta = 'gratis_click_to_wa';
-      }
-      // ---------------------------------------------
+      const empId = item.employee?.id || 'bot-ia';
+      const dataEnvio = item.opened_at || item.created_at || new Date().toISOString();
 
       const payload = {
-        id: idAtendimento,
-        operador_id: operadorId,
-        telefone_cliente: telefoneCliente,
-        tipo_mensagem: tipoMensagem,
-        direcao: direcao,
-        data_envio: dataEnvio,
-        is_template: isTemplate,
-        categoria_meta: categoriaMeta,
-        eh_click_to_whatsapp: isClickToWa
+        id: item.id,
+        operador_id: empId,
+        telefone_cliente: item.customer?.cel_phone || '',
+        tipo_mensagem: item.channel || 'whatsapp',
+        direcao: 'recebida', // Simplificado
+        data_envio: new Date(dataEnvio).toISOString(),
+        is_template: false, // Suprimido
+        categoria_meta: 'servico',
+        qtd_enviadas: item.total_send_messages || 0,
+        qtd_recebidas: item.total_receive_messages || 0
       };
 
-      const { error: errorMensagem } = await supabase.from('mensagens').upsert(payload, { onConflict: 'id' });
-
-      if (!errorMensagem) {
-        registrosProcessados++;
-      } else {
-        errosSupabase.push({
-          id_atendimento: idAtendimento,
-          payload_enviado: payload,
-          erro: errorMensagem
-        });
-      }
+      const { error } = await supabase.from('mensagens').upsert(payload, { onConflict: 'id' });
+      if (!error) registrosProcessados++;
     }
 
-    return NextResponse.json({ 
-      success: registrosProcessados > 0, 
-      registros_processados: registrosProcessados,
-      operadores_mapeados: listaOperadores.length,
-      total_erros: errosSupabase.length,
-      primeiro_erro: errosSupabase.length > 0 ? errosSupabase[0] : null,
-      amostra_json_tallos: relatorios.slice(0, 3) // Retorna as 3 últimas mensagens reais da RD/Tallos
-    });
+    return NextResponse.json({ success: true, registros_processados: registrosProcessados });
 
   } catch (error: any) {
-    return NextResponse.json(
-      { error: 'Erro na sincronização', detalhe: error.message || String(error) }, 
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Erro', detalhe: error.message }, { status: 500 });
   }
 }
