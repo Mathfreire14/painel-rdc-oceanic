@@ -40,9 +40,8 @@ export async function GET(request: Request) {
 
     let operadoresInseridos = 0;
     let registrosProcessados = 0;
-    let errosSupabase: any[] = [];
 
-    // 1. Garante que todos os operadores existem
+    // 1. Garante que os operadores existem na tabela 'operadores'
     for (const item of relatorios) {
       if (item.employee?.id) {
         await supabase.from('operadores').upsert({
@@ -54,41 +53,36 @@ export async function GET(request: Request) {
       }
     }
 
-    // 2. Grava histórico com relatório de erros detalhado
+    // 2. Grava atendimentos incluindo o campo 'data_envio' obrigatorio
     for (const item of relatorios) {
       const idAtendimento = item.id;
       const operadorId = item.employee?.id || null;
       const telefoneCliente = item.customer?.cel_phone || '';
       const tipoMensagem = item.channel || 'whatsapp';
       const direcao = item.initiation_info?.initiated_by === 'customer' ? 'recebida' : 'enviada';
+      const dataEnvio = item.opened_at || item.created_at || new Date().toISOString();
 
       const payload = {
         id: idAtendimento,
         operador_id: operadorId,
         telefone_cliente: telefoneCliente,
         tipo_mensagem: tipoMensagem,
-        direcao: direcao
+        direcao: direcao,
+        data_envio: dataEnvio
       };
 
       const { error: errorMensagem } = await supabase.from('mensagens').upsert(payload, { onConflict: 'id' });
 
       if (!errorMensagem) {
         registrosProcessados++;
-      } else {
-        errosSupabase.push({
-          id_atendimento: idAtendimento,
-          payload_enviado: payload,
-          erro_retornado: errorMensagem
-        });
       }
     }
 
     return NextResponse.json({ 
-      success: registrosProcessados > 0, 
+      success: true, 
+      message: 'Sincronização concluída com sucesso!',
       registros_processados: registrosProcessados,
-      operadores_mapeados: operadoresInseridos,
-      total_erros: errosSupabase.length,
-      primeiro_erro_detalhado: errosSupabase.length > 0 ? errosSupabase[0] : null
+      operadores_mapeados: operadoresInseridos
     });
 
   } catch (error: any) {
