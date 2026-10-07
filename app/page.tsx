@@ -1,6 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
 
-// Força a Vercel a sempre buscar dados novos no banco a cada acesso (sem cache estático)
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
@@ -11,7 +10,6 @@ export default async function DashboardPage() {
   let operadores: any[] = [];
   let erroMsg: string | null = null;
 
-  // Busca variáveis testando todas as variações de nomes possíveis no ambiente
   const supabaseUrl = 
     process.env.NEXT_PUBLIC_SUPABASE_URL || 
     process.env.SUPABASE_URL || 
@@ -21,23 +19,18 @@ export default async function DashboardPage() {
     process.env.SUPABASE_SERVICE_ROLE_KEY || 
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 
     process.env.SUPABASE_ANON_KEY || 
-    process.env.SUPABASE_KEY || 
     '';
 
   if (!supabaseUrl || !supabaseKey) {
-    erroMsg = `Variáveis do Supabase ausentes na Vercel. (URL detectada: ${supabaseUrl ? 'OK' : 'Ausente'}, KEY detectada: ${supabaseKey ? 'OK' : 'Ausente'})`;
+    erroMsg = `Variáveis do Supabase ausentes na Vercel.`;
   } else {
     try {
       const supabase = createClient(supabaseUrl, supabaseKey);
 
-      // Consulta as views criadas no Supabase
       const [resVol, resOp] = await Promise.all([
         supabase.from('vw_volumetria_diaria').select('*'),
         supabase.from('vw_performance_operadores').select('*')
       ]);
-
-      if (resVol.error) console.error('Erro ao consultar volumetria:', resVol.error);
-      if (resOp.error) console.error('Erro ao consultar operadores:', resOp.error);
 
       if (resVol.data && resVol.data.length > 0) {
         totalAtendimentos = resVol.data.reduce((acc: number, item: any) => acc + Number(item.total_atendimentos || 0), 0);
@@ -49,7 +42,7 @@ export default async function DashboardPage() {
         operadores = resOp.data;
       }
     } catch (err: any) {
-      erroMsg = `Erro na conexão com Supabase: ${err.message || String(err)}`;
+      erroMsg = `Erro na conexão: ${err.message || String(err)}`;
     }
   }
 
@@ -60,7 +53,7 @@ export default async function DashboardPage() {
 
       {erroMsg && (
         <div style={{ padding: '15px', backgroundColor: '#fed7d7', color: '#9b2c2c', borderRadius: '8px', marginBottom: '20px', border: '1px solid #feb2b2' }}>
-          <strong>Aviso de Configuração:</strong> {erroMsg}
+          <strong>Aviso:</strong> {erroMsg}
         </div>
       )}
 
@@ -109,7 +102,7 @@ export default async function DashboardPage() {
             ) : (
               <tr>
                 <td colSpan={5} style={{ padding: '20px', textAlign: 'center', color: '#718096' }}>
-                  Nenhum registro de operador encontrado no Supabase.
+                  Nenhum registro de operador encontrado.
                 </td>
               </tr>
             )}
