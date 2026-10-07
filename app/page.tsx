@@ -3,27 +3,19 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { 
-  Phone, Building2, Search, LogOut, MessageCircle, DollarSign, Bot, FileText 
+  Building2, Search, LogOut
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 
 interface OperadorData {
   nome_operador: string;
   setor_exibicao: string;
-  numero_whatsapp: string;
   total_trocadas: number;
   enviadas_custo: number;
   recebidas_gratis: number;
   total_templates: number;
   total_bot: number;
 }
-
-const CANAIS_OCEANIC = [
-  { numero: '554733117000', nome: 'Grupo Oceanic - Zoo' },
-  { numero: '551149346804', nome: 'Reserva Paulista - Simba' },
-  { numero: '551149346805', nome: 'Simba Safari SP' },
-  { numero: '5511947063245', nome: 'Chip 1' },
-];
 
 const TARIFA_SERVICO = 0.043;
 const TARIFA_TEMPLATE = 0.35;
@@ -34,30 +26,33 @@ export default function Dashboard() {
   const [dados, setDados] = useState<OperadorData[]>([]);
   
   // Estados dos Filtros
-  const [canalFiltro, setCanalFiltro] = useState('TODOS');
   const [setorFiltro, setSetorFiltro] = useState('TODOS');
   const [buscaOperador, setBuscaOperador] = useState('');
 
   useEffect(() => {
     async function carregarDados() {
       setLoading(true);
-      // Chamada direta à View que criamos no Supabase
+      
       const { data, error } = await supabase
         .from('vw_performance_operadores')
         .select('*');
 
-      if (data && !error) setDados(data);
+      if (error) {
+        console.error('Erro ao buscar dados no Supabase:', error.message);
+      } else if (data) {
+        setDados(data);
+      }
+      
       setLoading(false);
     }
     carregarDados();
   }, []);
 
-  // Aplicação dos Filtros Locais
+  // Aplicação dos Filtros Locais (Sem Canal)
   const dadosFiltrados = dados.filter(op => {
-    const matchCanal = canalFiltro === 'TODOS' || op.numero_whatsapp === canalFiltro;
     const matchSetor = setorFiltro === 'TODOS' || op.setor_exibicao === setorFiltro;
     const matchBusca = op.nome_operador.toLowerCase().includes(buscaOperador.toLowerCase());
-    return matchCanal && matchSetor && matchBusca;
+    return matchSetor && matchBusca;
   });
 
   // Cálculos de KPIs Globais
@@ -70,7 +65,7 @@ export default function Dashboard() {
   const custoTemplate = totalTemplates * TARIFA_TEMPLATE;
   const custoTotal = custoServico + custoTemplate;
 
-  // Lista dinâmica de setores para o Dropdown
+  // Lista dinâmica de setores para o Dropdown (ordenada alfabeticamente)
   const setoresUnicos = Array.from(new Set(dados.map(d => d.setor_exibicao))).filter(Boolean).sort();
 
   return (
@@ -91,20 +86,10 @@ export default function Dashboard() {
           </button>
         </div>
 
-        {/* Barra de Filtros (Estilo RD) */}
+        {/* Barra de Filtros (Estilo RD) - Apenas Setor e Busca */}
         <div className="flex flex-wrap items-center justify-between gap-4 bg-white p-4 rounded-lg border border-slate-200 shadow-sm">
           <div className="flex flex-wrap items-center gap-4 w-full md:w-auto">
-            <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-md px-3 py-2">
-              <Phone className="h-4 w-4 text-[#00c8b3]" />
-              <select 
-                value={canalFiltro} onChange={(e) => setCanalFiltro(e.target.value)}
-                className="bg-transparent text-sm font-semibold text-slate-700 outline-none cursor-pointer"
-              >
-                <option value="TODOS">Todos os Canais</option>
-                {CANAIS_OCEANIC.map((c, i) => <option key={i} value={c.numero}>{c.nome}</option>)}
-              </select>
-            </div>
-
+            
             <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-md px-3 py-2">
               <Building2 className="h-4 w-4 text-[#2b74e2]" />
               <select 
