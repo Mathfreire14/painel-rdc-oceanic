@@ -55,7 +55,8 @@ export default function Dashboard() {
   async function carregarUsuarios() {
     setLoadingUsuarios(true);
     try {
-      const res = await fetch('/api/auth');
+      // CORREÇÃO: Atualizado para a subpasta users
+      const res = await fetch('/api/auth/users');
       if (res.ok) {
         const data = await res.json();
         setUsuarios(data);
@@ -73,7 +74,8 @@ export default function Dashboard() {
     
     setIsCreating(true);
     try {
-      const res = await fetch('/api/auth', {
+      // CORREÇÃO: Atualizado para a subpasta users
+      const res = await fetch('/api/auth/users', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: novoEmail, password: novaSenha })
@@ -99,7 +101,8 @@ export default function Dashboard() {
     if (!window.confirm(`Tem a certeza que deseja revogar o acesso de ${email}?`)) return;
 
     try {
-      const res = await fetch(`/api/auth?id=${id}`, { method: 'DELETE' });
+      // CORREÇÃO: Atualizado para a subpasta users
+      const res = await fetch(`/api/auth/users?id=${id}`, { method: 'DELETE' });
       if (res.ok) {
         alert('Usuário removido com sucesso!');
         carregarUsuarios(); // Atualiza a lista
