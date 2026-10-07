@@ -1,13 +1,14 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
 
-export const dynamic = 'force-dynamic';
-
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 export async function GET(request: Request) {
+  // Apenas ler a URL da requisição já força o Next.js a tratar a rota como dinâmica (sem cache)
+  const urlParams = new URL(request.url);
+
   try {
     const rdToken = process.env.RD_API_TOKEN;
 
@@ -58,9 +59,9 @@ export async function GET(request: Request) {
         operador_id: empId,
         telefone_cliente: item.customer?.cel_phone || '',
         tipo_mensagem: item.channel || 'whatsapp',
-        direcao: 'recebida', // Simplificado
+        direcao: 'recebida',
         data_envio: new Date(dataEnvio).toISOString(),
-        is_template: false, // Suprimido
+        is_template: false,
         categoria_meta: 'servico',
         qtd_enviadas: item.total_send_messages || 0,
         qtd_recebidas: item.total_receive_messages || 0
@@ -70,7 +71,7 @@ export async function GET(request: Request) {
       if (!error) registrosProcessados++;
     }
 
-    return NextResponse.json({ success: true, registros_processados: registrosProcessados });
+    return NextResponse.json({ success: true, registros_processados: registrosProcessados, gerado_em: new Date().toISOString() });
 
   } catch (error: any) {
     return NextResponse.json({ error: 'Erro', detalhe: error.message }, { status: 500 });
