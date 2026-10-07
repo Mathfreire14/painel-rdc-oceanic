@@ -20,8 +20,8 @@ export async function GET(request: Request) {
     const startDate = dataSeteDiasAtras;
     const endDate = dataAtualBr;
 
-    // 2. Busca na API do RD Conversas / Tallos
-    const rdUrl = `https://api.tallos.com.br/v4/reports?start_date=${startDate}&end_date=${endDate}&limit=100`;
+    // 2. Limit ajustado para 50 conforme exigido pela API
+    const rdUrl = `https://api.tallos.com.br/v4/reports?start_date=${startDate}&end_date=${endDate}&limit=50`;
     
     const rdResponse = await fetch(rdUrl, {
       method: 'GET',
@@ -43,10 +43,10 @@ export async function GET(request: Request) {
     let operadoresInseridos = 0;
     let registrosProcessados = 0;
 
-    // 3. Processa e grava cada atendimento no Supabase
+    // 3. Gravação no Supabase
     for (const item of relatorios) {
+      // Atualiza ou insere o Operador na tabela 'operadores'
       if (item.employee?.id) {
-        // Atualiza ou insere o Operador na tabela de operadores
         await supabase.from('operadores').upsert({
           id: item.employee.id,
           nome: item.employee.name,
@@ -55,27 +55,25 @@ export async function GET(request: Request) {
         operadoresInseridos++;
       }
 
-      // Prepara os dados para salvar na tabela de mensagens / atendimentos
+      // Mapeia para os campos da sua tabela 'mensagens'
       const idAtendimento = item.id;
       const operadorId = item.employee?.id || null;
-      const enviadas = item.total_send_messages || 0;
-      const recebidas = item.total_receive_messages || 0;
-      const iniciadoPor = item.initiation_info?.initiated_by || 'desconhecido';
-      const dataCriacao = item.opened_at || item.created_at;
+      const telefoneCliente = item.customer?.cel_phone || '';
+      const tipoMensagem = item.channel || 'whatsapp';
+      const direcao = item.initiation_info?.initiated_by === 'customer' ? 'recebida' : 'enviada';
 
-      // Grava a métrica no banco
-      await supabase.from('mensagens').upsert({
+      // Grava no Supabase
+      const { error: errorMensagem } = await supabase.from('mensagens').upsert({
         id: idAtendimento,
         operador_id: operadorId,
-        mensagens_enviadas: enviadas,
-        mensagens_recebidas: recebidas,
-        iniciado_por: iniciadoPor,
-        tabulacao: item.to_tabulation || '',
-        departamento: item.to_department || '',
-        criado_em: dataCriacao
+        telefone_cliente: telefoneCliente,
+        tipo_mensagem: tipoMensagem,
+        direcao: direcao
       }, { onConflict: 'id' });
 
-      registrosProcessados++;
+      if (!errorMensagem) {
+        registrosProcessados++;
+      }
     }
 
     return NextResponse.json({ 
