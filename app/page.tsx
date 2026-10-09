@@ -232,7 +232,7 @@ export default function Painel() {
       <style>{ESTILOS}</style>
 
       <nav className="pn-trilho" aria-label="Seções do painel">
-        <div className="pn-marca" aria-hidden>Oc</div>
+        <img className="pn-marca" src="/logo-rd.png" alt="RD Station" />
         {nav('visao', 'Visão geral', LayoutDashboard)}
         {nav('operadores', 'Operadores', Users)}
         {nav('templates', 'Templates', FileText)}

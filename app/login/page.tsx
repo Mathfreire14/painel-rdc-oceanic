@@ -68,7 +68,7 @@ export default function LoginPage() {
     <div className="lg">
       <style>{ESTILOS}</style>
       <aside className="lg-lado">
-        <div className="lg-marca" aria-hidden>Oc</div>
+        <img className="lg-marca" src="/logo-rd.png" alt="RD Station" />
         <div>
           <h2>Quanto custa cada conversa no WhatsApp</h2>
           <p>Custos de mensageria do RD Conversas por setor, operador, bot e template, atualizados todos os dias.</p>
