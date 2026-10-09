@@ -1,398 +1,277 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { supabase } from '@/lib/supabase';
-import { Building2, Search, LogOut, Users, LayoutDashboard, UserPlus, Trash2, Mail, Key } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { LayoutDashboard, Users, FileText, Info, UserCircle, ShieldCheck, LogOut } from 'lucide-react';
+import { supabase } from '@/lib/supabase';
+import {
+  ESTILOS, BarraFiltros, VisaoGeral, Operadores, Templates, Informacoes, MinhaConta, GestaoAcessos, dataHora,
+  type DadosPainel, type Filtros, type Preset, type TemplateDetectado, type Tarifa, type Usuario,
+} from './components/abas';
 
-interface OperadorData {
-  nome_operador: string;
-  setores_exibicao: string;
-  total_trocadas: number;
-  enviadas_custo: number;
-  recebidas_gratis: number;
-  total_templates: number;
-  total_bot: number;
+type Aba = 'visao' | 'operadores' | 'templates' | 'info' | 'conta' | 'acessos';
+
+const TITULOS: Record<Aba, string> = {
+  visao: 'Visão geral',
+  operadores: 'Operadores',
+  templates: 'Templates',
+  info: 'Informações',
+  conta: 'Minha conta',
+  acessos: 'Gestão de acessos',
+};
+
+/* ---------- Datas (sempre no fuso de Brasília) ---------- */
+const hojeSP = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date());
+const paraData = (s: string) => new Date(`${s}T12:00:00Z`);
+const paraTexto = (d: Date) => d.toISOString().slice(0, 10);
+const somarDias = (s: string, n: number) => { const d = paraData(s); d.setUTCDate(d.getUTCDate() + n); return paraTexto(d); };
+const diasEntre = (a: string, b: string) => Math.round((paraData(b).getTime() - paraData(a).getTime()) / 86400000);
+const inicioMes = (s: string) => `${s.slice(0, 7)}-01`;
+const fimMes = (s: string) => { const d = paraData(inicioMes(s)); d.setUTCMonth(d.getUTCMonth() + 1); d.setUTCDate(0); return paraTexto(d); };
+const mesAnterior = (s: string) => { const d = paraData(inicioMes(s)); d.setUTCDate(0); return paraTexto(d); };
+
+function periodoDoPreset(p: Preset, inicio: string, fim: string) {
+  const hoje = hojeSP();
+  switch (p) {
+    case 'hoje': return { inicio: hoje, fim: hoje };
+    case 'ontem': { const o = somarDias(hoje, -1); return { inicio: o, fim: o }; }
+    case '7d': return { inicio: somarDias(hoje, -6), fim: hoje };
+    case '30d': return { inicio: somarDias(hoje, -29), fim: hoje };
+    case 'mes': return { inicio: inicioMes(hoje), fim: hoje };
+    case 'mes_anterior': { const f = mesAnterior(hoje); return { inicio: inicioMes(f), fim: f }; }
+    default: return { inicio, fim };
+  }
 }
 
-const TARIFA_SERVICO = 0.043;
+/* Período anterior equivalente: mês contra mês, ou o mesmo número de dias logo antes */
+function periodoAnterior(p: Preset, inicio: string, fim: string) {
+  if (p === 'mes' || p === 'mes_anterior') {
+    const fimAnt = mesAnterior(inicio);
+    const ini = inicioMes(fimAnt);
+    const dias = diasEntre(inicio, fim);
+    const f = somarDias(ini, dias);
+    return { inicio: ini, fim: f > fimAnt ? fimAnt : f };
+  }
+  const dias = diasEntre(inicio, fim);
+  return { inicio: somarDias(inicio, -(dias + 1)), fim: somarDias(inicio, -1) };
+}
 
-// Envia o token da sessão para as APIs protegidas
 async function authHeaders(): Promise<Record<string, string>> {
   const { data } = await supabase.auth.getSession();
   return { Authorization: `Bearer ${data.session?.access_token ?? ''}` };
 }
-const TARIFA_TEMPLATE = 0.35;
 
-export default function Dashboard() {
+export default function Painel() {
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'usuarios'>('dashboard');
-  const [sessaoOk, setSessaoOk] = useState(false);
-  const [isAdmin, setIsAdmin] = useState(false);
-  
-  // --- ESTADOS DO DASHBOARD ---
-  const [loading, setLoading] = useState(true);
-  const [dados, setDados] = useState<OperadorData[]>([]);
-  const [setorFiltro, setSetorFiltro] = useState('TODOS');
-  const [buscaOperador, setBuscaOperador] = useState('');
+  const [sessao, setSessao] = useState<{ id: string; email: string; admin: boolean } | null>(null);
+  const [aba, setAba] = useState<Aba>('visao');
 
-  // --- ESTADOS DE USUÁRIOS ---
-  const [usuarios, setUsuarios] = useState<any[]>([]);
-  const [loadingUsuarios, setLoadingUsuarios] = useState(false);
-  const [novoEmail, setNovoEmail] = useState('');
-  const [novaSenha, setNovaSenha] = useState('');
-  const [isCreating, setIsCreating] = useState(false);
+  // Filtros
+  const hoje = hojeSP();
+  const [filtros, setFiltros] = useState<Filtros>({
+    preset: 'mes', inicio: inicioMes(hoje), fim: hoje, setores: [], origens: [], categorias: [], operadores: [],
+  });
+  const periodo = useMemo(() => periodoDoPreset(filtros.preset, filtros.inicio, filtros.fim), [filtros.preset, filtros.inicio, filtros.fim]);
+  const anteriorP = useMemo(() => periodoAnterior(filtros.preset, periodo.inicio, periodo.fim), [filtros.preset, periodo]);
+
+  // Dados
+  const [atual, setAtual] = useState<DadosPainel | null>(null);
+  const [anterior, setAnterior] = useState<DadosPainel | null>(null);
+  const [carregando, setCarregando] = useState(true);
+  const [versao, setVersao] = useState(0); // força recarregar os números
+  const [erro, setErro] = useState<string | null>(null);
+  const [opcoesSetor, setOpcoesSetor] = useState<string[]>([]);
+  const [nomesOperadores, setNomesOperadores] = useState<string[]>([]);
+  const [templates, setTemplates] = useState<TemplateDetectado[]>([]);
+  const [carregandoTemplates, setCarregandoTemplates] = useState(false);
+  const [tarifas, setTarifas] = useState<Tarifa[]>([]);
+  const [modelo, setModelo] = useState('creditos');
+  const [usuarios, setUsuarios] = useState<Usuario[]>([]);
+  const [carregandoUsuarios, setCarregandoUsuarios] = useState(false);
 
   // Sem login, volta para a tela de login
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
-      if (!data.session) {
-        router.replace('/login');
-        return;
-      }
-      setIsAdmin(data.session.user.app_metadata?.role === 'admin');
-      setSessaoOk(true);
+      const u = data.session?.user;
+      if (!u) { router.replace('/login'); return; }
+      setSessao({ id: u.id, email: u.email ?? '', admin: u.app_metadata?.role === 'admin' });
     });
+    const { data: sub } = supabase.auth.onAuthStateChange((evento, s) => {
+      if (evento === 'SIGNED_OUT' || !s) router.replace('/login');
+    });
+    return () => sub.subscription.unsubscribe();
   }, [router]);
 
+  // Opções dos filtros e informações fixas
   useEffect(() => {
-    if (!sessaoOk) return;
-    async function carregarDadosDashboard() {
-      setLoading(true);
-      const { data, error } = await supabase.from('vw_performance_operadores').select('*');
-      if (data && !error) setDados(data);
-      setLoading(false);
-    }
-    carregarDadosDashboard();
-  }, [sessaoOk]);
+    if (!sessao) return;
+    (async () => {
+      const [setores, ops, tar, conf] = await Promise.all([
+        supabase.from('mapeamento_setores').select('nome_exibicao'),
+        supabase.from('mapeamento_operadores').select('nome_exibicao'),
+        supabase.from('tarifas').select('*').order('categoria'),
+        supabase.from('configuracao').select('chave, valor'),
+      ]);
+      const nomesSetor = Array.from(new Set((setores.data ?? []).map(s => s.nome_exibicao as string))).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+      setOpcoesSetor([...nomesSetor, 'Sem setor']);
+      setNomesOperadores((ops.data ?? []).map(o => o.nome_exibicao as string));
+      setTarifas((tar.data ?? []) as Tarifa[]);
+      setModelo((conf.data ?? []).find(c => c.chave === 'modelo_cobranca')?.valor ?? 'creditos');
+    })();
+  }, [sessao]);
 
+  // Números do painel (período atual e anterior)
   useEffect(() => {
-    if (activeTab === 'usuarios') {
-      carregarUsuarios();
-    }
-  }, [activeTab]);
+    if (!sessao) return;
+    let cancelado = false;
+    setCarregando(true);
+    setErro(null);
+    const params = (p: { inicio: string; fim: string }) => ({
+      p_inicio: p.inicio,
+      p_fim: p.fim,
+      p_setores: filtros.setores.length ? filtros.setores : null,
+      p_origens: filtros.origens.length ? filtros.origens : null,
+      p_categorias: filtros.categorias.length ? filtros.categorias : null,
+      p_operadores: filtros.operadores.length ? filtros.operadores : null,
+    });
+    Promise.all([
+      supabase.rpc('dashboard_dados', params(periodo)),
+      supabase.rpc('dashboard_dados', params(anteriorP)),
+    ]).then(([a, b]) => {
+      if (cancelado) return;
+      if (a.error) setErro(`Não foi possível carregar os dados: ${a.error.message}`);
+      else { setAtual(a.data as DadosPainel); setAnterior(b.error ? null : (b.data as DadosPainel)); }
+      setCarregando(false);
+    });
+    return () => { cancelado = true; };
+  }, [sessao, periodo, anteriorP, filtros.setores, filtros.origens, filtros.categorias, filtros.operadores, versao]);
 
-  // --- LÓGICA DA API DE USUÁRIOS ---
-  async function carregarUsuarios() {
-    setLoadingUsuarios(true);
-    try {
-      // CORREÇÃO: Atualizado para a subpasta users
-      const res = await fetch('/api/auth/users', { headers: await authHeaders() });
-      if (res.ok) {
-        const data = await res.json();
-        setUsuarios(data);
-      }
-    } catch (err) {
-      console.error('Erro ao carregar usuários:', err);
-    } finally {
-      setLoadingUsuarios(false);
-    }
-  }
+  const opcoesOperador = useMemo(() => {
+    const doPeriodo = atual?.operadores.map(o => o.operador) ?? [];
+    return Array.from(new Set([...nomesOperadores, ...doPeriodo])).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  }, [nomesOperadores, atual]);
 
-  async function handleCriarUsuario(e: React.FormEvent) {
-    e.preventDefault();
-    if (!novoEmail || !novaSenha) return alert('Preencha o e-mail e a palavra-passe.');
-    
-    setIsCreating(true);
-    try {
-      // CORREÇÃO: Atualizado para a subpasta users
-      const res = await fetch('/api/auth/users', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(await authHeaders()) },
-        body: JSON.stringify({ email: novoEmail, password: novaSenha })
-      });
-      
-      const data = await res.json();
-      if (res.ok) {
-        alert('Usuário criado com sucesso!');
-        setNovoEmail('');
-        setNovaSenha('');
-        carregarUsuarios(); // Atualiza a lista
-      } else {
-        alert('Erro ao criar usuário: ' + data.error);
-      }
-    } catch (err) {
-      alert('Erro inesperado de conexão.');
-    } finally {
-      setIsCreating(false);
-    }
-  }
+  /* ---------- Templates ---------- */
+  const carregarTemplates = useCallback(async () => {
+    setCarregandoTemplates(true);
+    const { data } = await supabase.from('vw_templates_detectados').select('*').order('envios', { ascending: false });
+    setTemplates((data ?? []) as TemplateDetectado[]);
+    setCarregandoTemplates(false);
+  }, []);
+  useEffect(() => { if (sessao && aba === 'templates') carregarTemplates(); }, [sessao, aba, carregarTemplates]);
 
-  async function handleExcluirUsuario(id: string, email: string) {
-    if (!window.confirm(`Tem a certeza que deseja revogar o acesso de ${email}?`)) return;
+  const salvarTemplate = async (t: { padrao: string; titulo: string; categoria: string }) => {
+    const { error } = await supabase.from('templates_categoria').upsert(
+      { padrao: t.padrao, titulo: t.titulo || null, categoria: t.categoria }, { onConflict: 'padrao' },
+    );
+    if (error) return `Não foi possível salvar: ${error.message}`;
+    await carregarTemplates();
+    setVersao(v => v + 1); // recalcula os números com a nova categoria
+    return null;
+  };
 
-    try {
-      // CORREÇÃO: Atualizado para a subpasta users
-      const res = await fetch(`/api/auth/users?id=${id}`, { method: 'DELETE', headers: await authHeaders() });
-      if (res.ok) {
-        alert('Usuário removido com sucesso!');
-        carregarUsuarios(); // Atualiza a lista
-      } else {
-        const data = await res.json();
-        alert('Erro ao excluir: ' + data.error);
-      }
-    } catch (err) {
-      alert('Erro inesperado de conexão.');
-    }
-  }
+  /* ---------- Usuários ---------- */
+  const carregarUsuarios = useCallback(async () => {
+    setCarregandoUsuarios(true);
+    const res = await fetch('/api/auth/users', { headers: await authHeaders() });
+    if (res.ok) setUsuarios(await res.json());
+    setCarregandoUsuarios(false);
+  }, []);
+  useEffect(() => { if (sessao?.admin && aba === 'acessos') carregarUsuarios(); }, [sessao, aba, carregarUsuarios]);
 
-  // --- CÁLCULOS DO DASHBOARD ---
-  const todosSetores = dados.flatMap(d => (d.setores_exibicao || '').split(',').map(s => s.trim()));
-  const setoresUnicos = Array.from(new Set(todosSetores)).filter(Boolean).sort();
+  const criarUsuario = async (email: string, senha: string, admin: boolean) => {
+    const res = await fetch('/api/auth/users', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(await authHeaders()) },
+      body: JSON.stringify({ email, password: senha, is_admin: admin }),
+    });
+    const corpo = await res.json().catch(() => ({}));
+    if (!res.ok) return corpo.error ?? 'Não foi possível criar o acesso.';
+    await carregarUsuarios();
+    return null;
+  };
+  const excluirUsuario = async (id: string) => {
+    const res = await fetch(`/api/auth/users?id=${id}`, { method: 'DELETE', headers: await authHeaders() });
+    const corpo = await res.json().catch(() => ({}));
+    if (!res.ok) return corpo.error ?? 'Não foi possível remover o acesso.';
+    await carregarUsuarios();
+    return null;
+  };
 
-  const dadosFiltrados = dados.filter(op => {
-    const matchSetor = setorFiltro === 'TODOS' || (op.setores_exibicao && op.setores_exibicao.includes(setorFiltro));
-    const matchBusca = op.nome_operador.toLowerCase().includes(buscaOperador.toLowerCase());
-    return matchSetor && matchBusca;
-  });
+  /* ---------- Minha conta ---------- */
+  const trocarSenha = async (atualSenha: string, nova: string) => {
+    if (!sessao) return 'Sessão expirada. Entre novamente.';
+    const { error: errLogin } = await supabase.auth.signInWithPassword({ email: sessao.email, password: atualSenha });
+    if (errLogin) return 'A senha atual está incorreta.';
+    const { error } = await supabase.auth.updateUser({ password: nova });
+    if (error) return `Não foi possível alterar a senha: ${error.message}`;
+    return null;
+  };
 
-  const totalEnviadas = dadosFiltrados.reduce((acc, curr) => acc + Number(curr.enviadas_custo || 0), 0);
-  const totalRecebidas = dadosFiltrados.reduce((acc, curr) => acc + Number(curr.recebidas_gratis || 0), 0);
-  const totalTemplates = dadosFiltrados.reduce((acc, curr) => acc + Number(curr.total_templates || 0), 0);
-  const totalBot = dadosFiltrados.reduce((acc, curr) => acc + Number(curr.total_bot || 0), 0);
-  
-  const custoTotal = (totalEnviadas * TARIFA_SERVICO) + (totalTemplates * TARIFA_TEMPLATE);
+  const sair = async () => { await supabase.auth.signOut(); router.replace('/login'); };
 
-  if (!sessaoOk) return null;
+  if (!sessao) return null;
+
+  const usaFiltros = aba === 'visao' || aba === 'operadores';
+  const nav = (id: Aba, rotulo: string, Icone: typeof LayoutDashboard) => (
+    <button type="button" className="pn-nav" aria-current={aba === id ? 'page' : undefined} onClick={() => setAba(id)}>
+      <Icone size={20} />{rotulo}
+    </button>
+  );
 
   return (
-    <div className="min-h-screen bg-[#f4f7f9] text-slate-800 font-sans p-6">
-      <div className="mx-auto max-w-7xl space-y-6">
-        
-        {/* CABEÇALHO GERAL */}
-        <div className="flex flex-col gap-4 border-b border-slate-200 pb-4 md:flex-row md:items-center md:justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-[#1a2b3c]">Painel de Controle - API Meta / RD</h1>
-            <p className="text-sm text-slate-500 mt-1">Gestão de Consumo e Acessos do Sistema.</p>
-          </div>
-          <button
-            onClick={() => { supabase.auth.signOut(); router.push('/login'); }}
-            className="flex items-center gap-2 rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-red-600 hover:bg-slate-50 shadow-sm transition-all"
-          >
-            <LogOut className="h-4 w-4" /> Sair
-          </button>
-        </div>
+    <div className="pn-app">
+      <style>{ESTILOS}</style>
 
-        {/* NAVEGAÇÃO EM ABAS */}
-        <div className="flex gap-2">
-          <button 
-            onClick={() => setActiveTab('dashboard')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg font-semibold text-sm transition-all ${activeTab === 'dashboard' ? 'bg-[#2b74e2] text-white shadow' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'}`}
-          >
-            <LayoutDashboard className="h-4 w-4" /> Dashboard de Consumo
-          </button>
-          {isAdmin && (
-          <button 
-            onClick={() => setActiveTab('usuarios')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg font-semibold text-sm transition-all ${activeTab === 'usuarios' ? 'bg-[#2b74e2] text-white shadow' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'}`}
-          >
-            <Users className="h-4 w-4" /> Gestão de Acessos
-          </button>
+      <nav className="pn-trilho" aria-label="Seções do painel">
+        <div className="pn-marca" aria-hidden>Oc</div>
+        {nav('visao', 'Visão geral', LayoutDashboard)}
+        {nav('operadores', 'Operadores', Users)}
+        {nav('templates', 'Templates', FileText)}
+        {nav('info', 'Informações', Info)}
+        <div className="pn-trilho-fim">
+          {nav('conta', 'Minha conta', UserCircle)}
+          {sessao.admin && nav('acessos', 'Acessos', ShieldCheck)}
+          <button type="button" className="pn-nav" onClick={sair}><LogOut size={20} />Sair</button>
+        </div>
+      </nav>
+
+      <div className="pn-principal">
+        <header className="pn-topo">
+          <div className="pn-titulo">
+            <h1>{TITULOS[aba]}</h1>
+            <span>Custos de mensageria do WhatsApp no RD Conversas, Grupo Oceanic</span>
+          </div>
+          {usaFiltros && (
+            <BarraFiltros filtros={{ ...filtros, inicio: periodo.inicio, fim: periodo.fim }} setFiltros={setFiltros}
+              opcoesSetor={opcoesSetor} opcoesOperador={opcoesOperador} periodoAnterior={anteriorP} carregando={carregando} />
           )}
-        </div>
+        </header>
 
-        {/* =========================================
-            ABA 1: DASHBOARD
-        ============================================= */}
-        {activeTab === 'dashboard' && (
-          <div className="space-y-6 animate-in fade-in duration-300">
-            {/* Filtros */}
-            <div className="flex flex-wrap items-center justify-between gap-4 bg-white p-4 rounded-lg border border-slate-200 shadow-sm">
-              <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-md px-3 py-2 w-full md:w-auto">
-                <Building2 className="h-4 w-4 text-[#2b74e2]" />
-                <select 
-                  value={setorFiltro} onChange={(e) => setSetorFiltro(e.target.value)}
-                  className="bg-transparent text-sm font-semibold text-slate-700 outline-none cursor-pointer"
-                >
-                  <option value="TODOS">Todos os Setores</option>
-                  {setoresUnicos.map((s, i) => <option key={i} value={s}>{s}</option>)}
-                </select>
-              </div>
-
-              <div className="relative w-full md:w-72">
-                <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-                <input
-                  type="text" placeholder="Buscar por atendente..."
-                  value={buscaOperador} onChange={(e) => setBuscaOperador(e.target.value)}
-                  className="w-full rounded-md border border-slate-200 bg-slate-50 pl-9 pr-3 py-2 text-sm text-slate-700 focus:border-[#2b74e2] focus:bg-white outline-none transition-all"
-                />
-              </div>
+        <main className="pn-conteudo">
+          {usaFiltros && erro && <div className="pn-aviso-erro">{erro}</div>}
+          {usaFiltros && !erro && !atual && <p className="pn-vazio">Carregando dados…</p>}
+          {usaFiltros && atual && (
+            <div className={carregando ? 'pn-carregando' : ''}>
+              {aba === 'visao' ? <VisaoGeral atual={atual} anterior={anterior} /> : <Operadores dados={atual} />}
             </div>
+          )}
+          {aba === 'templates' && <Templates templates={templates} carregando={carregandoTemplates} onSalvar={salvarTemplate} />}
+          {aba === 'info' && (
+            <Informacoes tarifas={tarifas} modelo={modelo}
+              ultimaSync={atual?.ultima_sincronizacao ?? null} painelAtualizado={atual?.painel_atualizado_em ?? null} />
+          )}
+          {aba === 'conta' && <MinhaConta email={sessao.email} onTrocarSenha={trocarSenha} />}
+          {aba === 'acessos' && sessao.admin && (
+            <GestaoAcessos usuarios={usuarios} carregando={carregandoUsuarios} meuId={sessao.id}
+              onCriar={criarUsuario} onExcluir={excluirUsuario} />
+          )}
+        </main>
 
-            {/* KPIs */}
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-5">
-              <div className="rounded-lg border-l-4 border-l-[#2b74e2] bg-white p-5 shadow-sm border border-slate-200">
-                <div className="text-xs font-bold text-slate-400 uppercase">Custo Total (Estimado)</div>
-                <div className="mt-2 text-2xl font-black text-[#2b74e2]">R$ {custoTotal.toFixed(2)}</div>
-              </div>
-              <div className="rounded-lg border-l-4 border-l-[#00c8b3] bg-white p-5 shadow-sm border border-slate-200">
-                <div className="text-xs font-bold text-slate-400 uppercase">Enviadas (Com Custo)</div>
-                <div className="mt-2 text-2xl font-black text-[#00c8b3]">{totalEnviadas}</div>
-                <div className="text-[11px] text-slate-400 mt-1">R$ 0,043 / msg</div>
-              </div>
-              <div className="rounded-lg border-l-4 border-l-[#8a3ffc] bg-white p-5 shadow-sm border border-slate-200">
-                <div className="text-xs font-bold text-slate-400 uppercase">Recebidas (Grátis)</div>
-                <div className="mt-2 text-2xl font-black text-[#8a3ffc]">{totalRecebidas}</div>
-                <div className="text-[11px] text-slate-400 mt-1">Custo Zero</div>
-              </div>
-              <div className="rounded-lg border-l-4 border-l-[#f1c21b] bg-white p-5 shadow-sm border border-slate-200">
-                <div className="text-xs font-bold text-slate-400 uppercase">Retenção Bot / IA</div>
-                <div className="mt-2 text-2xl font-black text-[#f1c21b]">{totalBot}</div>
-                <div className="text-[11px] text-slate-400 mt-1">Interações sem humano</div>
-              </div>
-              <div className="rounded-lg border-l-4 border-l-[#ff832b] bg-white p-5 shadow-sm border border-slate-200">
-                <div className="text-xs font-bold text-slate-400 uppercase">Templates / Ativos</div>
-                <div className="mt-2 text-2xl font-black text-[#ff832b]">{totalTemplates}</div>
-                <div className="text-[11px] text-slate-400 mt-1">R$ 0,35 / disparo</div>
-              </div>
-            </div>
-
-            {/* Tabela */}
-            <div className="rounded-lg border border-slate-200 bg-white shadow-sm overflow-hidden">
-              <div className="p-5 border-b border-slate-100 bg-white">
-                <h2 className="text-base font-bold text-[#1a2b3c]">Consumo Gerado por Atendente / IA</h2>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-sm">
-                  <thead className="bg-slate-50 text-xs font-bold text-slate-500 uppercase">
-                    <tr>
-                      <th className="px-5 py-3">Agente / Operador</th>
-                      <th className="px-5 py-3">Setores de Atuação</th>
-                      <th className="px-5 py-3 text-center">Trocadas</th>
-                      <th className="px-5 py-3 text-center">Enviadas (Custo)</th>
-                      <th className="px-5 py-3 text-center">Recebidas (Grátis)</th>
-                      <th className="px-5 py-3 text-right">Custo Estimado</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 text-slate-700">
-                    {loading ? (
-                      <tr><td colSpan={6} className="py-8 text-center text-slate-400">Calculando matriz...</td></tr>
-                    ) : dadosFiltrados.map((op, idx) => {
-                        const custoLinha = (op.enviadas_custo * TARIFA_SERVICO) + (op.total_templates * TARIFA_TEMPLATE);
-                        const isBot = op.nome_operador.includes('Automação') || op.nome_operador.includes('Bot');
-                        return (
-                          <tr key={idx} className="hover:bg-slate-50 transition-colors">
-                            <td className={`px-5 py-4 font-bold ${isBot ? 'text-[#f1c21b]' : 'text-slate-900'}`}>{op.nome_operador}</td>
-                            <td className="px-5 py-4">
-                              <div className="flex flex-wrap gap-1">
-                                {op.setores_exibicao?.split(',').map((setor, sIdx) => (
-                                  <span key={sIdx} className="inline-block bg-slate-100 border border-slate-200 text-slate-600 rounded px-2 py-0.5 text-[11px] font-semibold">{setor.trim()}</span>
-                                ))}
-                              </div>
-                            </td>
-                            <td className="px-5 py-4 text-center font-medium">{op.total_trocadas}</td>
-                            <td className="px-5 py-4 text-center font-bold text-[#00c8b3]">{op.enviadas_custo}</td>
-                            <td className="px-5 py-4 text-center font-medium text-[#8a3ffc]">{op.recebidas_gratis}</td>
-                            <td className="px-5 py-4 text-right font-black text-[#2b74e2]">R$ {custoLinha.toFixed(2)}</td>
-                          </tr>
-                        );
-                      })
-                    }
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* =========================================
-            ABA 2: GESTÃO DE ACESSOS (USUÁRIOS)
-        ============================================= */}
-        {activeTab === 'usuarios' && isAdmin && (
-          <div className="space-y-6 animate-in fade-in duration-300">
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              
-              {/* Formulário de Criação */}
-              <div className="lg:col-span-1 bg-white p-5 rounded-lg border border-slate-200 shadow-sm h-fit">
-                <h2 className="text-base font-bold text-[#1a2b3c] mb-5 flex items-center gap-2">
-                  <UserPlus className="h-5 w-5 text-[#2b74e2]" /> Novo Acesso
-                </h2>
-                <form onSubmit={handleCriarUsuario} className="space-y-4">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-500 mb-1 flex items-center gap-1">
-                      <Mail className="h-3 w-3" /> E-mail
-                    </label>
-                    <input 
-                      type="email" required
-                      value={novoEmail} onChange={(e) => setNovoEmail(e.target.value)}
-                      className="w-full rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm focus:border-[#2b74e2] focus:bg-white outline-none transition-colors" 
-                      placeholder="admin@grupooceanic.com.br"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-500 mb-1 flex items-center gap-1">
-                      <Key className="h-3 w-3" /> Palavra-passe
-                    </label>
-                    <input 
-                      type="password" required minLength={8}
-                      value={novaSenha} onChange={(e) => setNovaSenha(e.target.value)}
-                      className="w-full rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm focus:border-[#2b74e2] focus:bg-white outline-none transition-colors" 
-                      placeholder="Mínimo de 8 caracteres"
-                    />
-                  </div>
-                  <button 
-                    type="submit" 
-                    disabled={isCreating}
-                    className="w-full bg-[#2b74e2] hover:bg-blue-700 text-white font-semibold py-2 rounded-md text-sm transition-colors mt-2 disabled:opacity-50"
-                  >
-                    {isCreating ? 'A criar...' : 'Criar Conta de Acesso'}
-                  </button>
-                </form>
-              </div>
-
-              {/* Lista de Usuários */}
-              <div className="lg:col-span-2 bg-white rounded-lg border border-slate-200 shadow-sm overflow-hidden">
-                <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-                  <h2 className="text-base font-bold text-[#1a2b3c]">Contas Autorizadas</h2>
-                  <span className="bg-[#2b74e2]/10 text-[#2b74e2] text-xs font-bold px-2 py-1 rounded">
-                    {usuarios.length} Ativas
-                  </span>
-                </div>
-                
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-sm">
-                    <thead className="bg-white border-b border-slate-100 text-xs font-bold text-slate-400 uppercase">
-                      <tr>
-                        <th className="px-5 py-3">E-mail de Acesso</th>
-                        <th className="px-5 py-3">Data de Criação</th>
-                        <th className="px-5 py-3 text-right">Ação</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 text-slate-700 bg-white">
-                      {loadingUsuarios ? (
-                        <tr><td colSpan={3} className="py-8 text-center text-slate-400">A carregar acessos...</td></tr>
-                      ) : usuarios.length === 0 ? (
-                        <tr><td colSpan={3} className="py-8 text-center text-slate-400">Nenhum acesso registado.</td></tr>
-                      ) : (
-                        usuarios.map((user) => (
-                          <tr key={user.id} className="hover:bg-slate-50 transition-colors">
-                            <td className="px-5 py-4 font-semibold text-slate-800">
-                              {user.email}
-                            </td>
-                            <td className="px-5 py-4 text-xs text-slate-500">
-                              {new Date(user.created_at).toLocaleDateString('pt-BR')} às {new Date(user.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
-                            </td>
-                            <td className="px-5 py-4 text-right">
-                              <button 
-                                onClick={() => handleExcluirUsuario(user.id, user.email)}
-                                className="inline-flex items-center justify-center p-2 rounded-md text-red-500 hover:bg-red-50 hover:text-red-700 transition-colors"
-                                title="Remover Acesso"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </button>
-                            </td>
-                          </tr>
-                        ))
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-            </div>
-          </div>
-        )}
-
+        <footer className="pn-rodape">
+          <span>Dados do RD Conversas sincronizados em {dataHora(atual?.ultima_sincronizacao)}</span>
+          <span>Painel recalculado em {dataHora(atual?.painel_atualizado_em)}</span>
+        </footer>
       </div>
     </div>
   );
