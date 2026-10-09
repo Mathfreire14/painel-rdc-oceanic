@@ -30,8 +30,7 @@ const inicioMes = (s: string) => `${s.slice(0, 7)}-01`;
 const fimMes = (s: string) => { const d = paraData(inicioMes(s)); d.setUTCMonth(d.getUTCMonth() + 1); d.setUTCDate(0); return paraTexto(d); };
 const mesAnterior = (s: string) => { const d = paraData(inicioMes(s)); d.setUTCDate(0); return paraTexto(d); };
 
-function periodoDoPreset(p: Preset, inicio: string, fim: string) {
-  const hoje = hojeSP();
+function periodoDoPreset(p: Preset, inicio: string, fim: string, hoje: string) {
   switch (p) {
     case 'hoje': return { inicio: hoje, fim: hoje };
     case 'ontem': { const o = somarDias(hoje, -1); return { inicio: o, fim: o }; }
@@ -66,13 +65,22 @@ export default function Painel() {
   const [sessao, setSessao] = useState<{ id: string; email: string; admin: boolean } | null>(null);
   const [aba, setAba] = useState<Aba>('visao');
 
+  // Data de hoje: lida só no navegador (o Next não permite ler a hora durante a geração da página)
+  const [hoje, setHoje] = useState<string | null>(null);
+  useEffect(() => { setHoje(hojeSP()); }, []);
+
   // Filtros
-  const hoje = hojeSP();
   const [filtros, setFiltros] = useState<Filtros>({
-    preset: 'mes', inicio: inicioMes(hoje), fim: hoje, setores: [], origens: [], categorias: [], operadores: [],
+    preset: 'mes', inicio: '', fim: '', setores: [], origens: [], categorias: [], operadores: [],
   });
-  const periodo = useMemo(() => periodoDoPreset(filtros.preset, filtros.inicio, filtros.fim), [filtros.preset, filtros.inicio, filtros.fim]);
-  const anteriorP = useMemo(() => periodoAnterior(filtros.preset, periodo.inicio, periodo.fim), [filtros.preset, periodo]);
+  const periodo = useMemo(
+    () => (hoje ? periodoDoPreset(filtros.preset, filtros.inicio || hoje, filtros.fim || hoje, hoje) : null),
+    [hoje, filtros.preset, filtros.inicio, filtros.fim],
+  );
+  const anteriorP = useMemo(
+    () => (periodo ? periodoAnterior(filtros.preset, periodo.inicio, periodo.fim) : null),
+    [filtros.preset, periodo],
+  );
 
   // Dados
   const [atual, setAtual] = useState<DadosPainel | null>(null);
@@ -122,7 +130,7 @@ export default function Painel() {
 
   // Números do painel (período atual e anterior)
   useEffect(() => {
-    if (!sessao) return;
+    if (!sessao || !periodo || !anteriorP) return;
     let cancelado = false;
     setCarregando(true);
     setErro(null);
@@ -210,7 +218,7 @@ export default function Painel() {
 
   const sair = async () => { await supabase.auth.signOut(); router.replace('/login'); };
 
-  if (!sessao) return null;
+  if (!sessao || !periodo || !anteriorP) return null;
 
   const usaFiltros = aba === 'visao' || aba === 'operadores';
   const nav = (id: Aba, rotulo: string, Icone: typeof LayoutDashboard) => (
