@@ -16,11 +16,19 @@ interface OperadorData {
 }
 
 const TARIFA_SERVICO = 0.043;
+
+// Envia o token da sessão para as APIs protegidas
+async function authHeaders(): Promise<Record<string, string>> {
+  const { data } = await supabase.auth.getSession();
+  return { Authorization: `Bearer ${data.session?.access_token ?? ''}` };
+}
 const TARIFA_TEMPLATE = 0.35;
 
 export default function Dashboard() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<'dashboard' | 'usuarios'>('dashboard');
+  const [sessaoOk, setSessaoOk] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
   
   // --- ESTADOS DO DASHBOARD ---
   const [loading, setLoading] = useState(true);
@@ -35,7 +43,20 @@ export default function Dashboard() {
   const [novaSenha, setNovaSenha] = useState('');
   const [isCreating, setIsCreating] = useState(false);
 
+  // Sem login, volta para a tela de login
   useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => {
+      if (!data.session) {
+        router.replace('/login');
+        return;
+      }
+      setIsAdmin(data.session.user.app_metadata?.role === 'admin');
+      setSessaoOk(true);
+    });
+  }, [router]);
+
+  useEffect(() => {
+    if (!sessaoOk) return;
     async function carregarDadosDashboard() {
       setLoading(true);
       const { data, error } = await supabase.from('vw_performance_operadores').select('*');
@@ -43,7 +64,7 @@ export default function Dashboard() {
       setLoading(false);
     }
     carregarDadosDashboard();
-  }, []);
+  }, [sessaoOk]);
 
   useEffect(() => {
     if (activeTab === 'usuarios') {
@@ -56,7 +77,7 @@ export default function Dashboard() {
     setLoadingUsuarios(true);
     try {
       // CORREÇÃO: Atualizado para a subpasta users
-      const res = await fetch('/api/auth/users');
+      const res = await fetch('/api/auth/users', { headers: await authHeaders() });
       if (res.ok) {
         const data = await res.json();
         setUsuarios(data);
@@ -77,7 +98,7 @@ export default function Dashboard() {
       // CORREÇÃO: Atualizado para a subpasta users
       const res = await fetch('/api/auth/users', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...(await authHeaders()) },
         body: JSON.stringify({ email: novoEmail, password: novaSenha })
       });
       
@@ -102,7 +123,7 @@ export default function Dashboard() {
 
     try {
       // CORREÇÃO: Atualizado para a subpasta users
-      const res = await fetch(`/api/auth/users?id=${id}`, { method: 'DELETE' });
+      const res = await fetch(`/api/auth/users?id=${id}`, { method: 'DELETE', headers: await authHeaders() });
       if (res.ok) {
         alert('Usuário removido com sucesso!');
         carregarUsuarios(); // Atualiza a lista
@@ -132,6 +153,8 @@ export default function Dashboard() {
   
   const custoTotal = (totalEnviadas * TARIFA_SERVICO) + (totalTemplates * TARIFA_TEMPLATE);
 
+  if (!sessaoOk) return null;
+
   return (
     <div className="min-h-screen bg-[#f4f7f9] text-slate-800 font-sans p-6">
       <div className="mx-auto max-w-7xl space-y-6">
@@ -158,12 +181,14 @@ export default function Dashboard() {
           >
             <LayoutDashboard className="h-4 w-4" /> Dashboard de Consumo
           </button>
+          {isAdmin && (
           <button 
             onClick={() => setActiveTab('usuarios')}
             className={`flex items-center gap-2 px-4 py-2 rounded-lg font-semibold text-sm transition-all ${activeTab === 'usuarios' ? 'bg-[#2b74e2] text-white shadow' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'}`}
           >
             <Users className="h-4 w-4" /> Gestão de Acessos
           </button>
+          )}
         </div>
 
         {/* =========================================
@@ -273,7 +298,7 @@ export default function Dashboard() {
         {/* =========================================
             ABA 2: GESTÃO DE ACESSOS (USUÁRIOS)
         ============================================= */}
-        {activeTab === 'usuarios' && (
+        {activeTab === 'usuarios' && isAdmin && (
           <div className="space-y-6 animate-in fade-in duration-300">
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               
@@ -299,10 +324,10 @@ export default function Dashboard() {
                       <Key className="h-3 w-3" /> Palavra-passe
                     </label>
                     <input 
-                      type="password" required minLength={6}
+                      type="password" required minLength={8}
                       value={novaSenha} onChange={(e) => setNovaSenha(e.target.value)}
                       className="w-full rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm focus:border-[#2b74e2] focus:bg-white outline-none transition-colors" 
-                      placeholder="Mínimo de 6 caracteres"
+                      placeholder="Mínimo de 8 caracteres"
                     />
                   </div>
                   <button 
